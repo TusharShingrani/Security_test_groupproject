@@ -49,7 +49,7 @@ pr: none
 # Self-hosted agent – no parallelism cost on free Azure DevOps orgs.
 # See the AGENT POOL NOTE above for setup instructions.
 pool:
-  name: Default
+  name: self-hosted-agent
 
 variables:
   TF_DIR:     $(System.DefaultWorkingDirectory)/infra
