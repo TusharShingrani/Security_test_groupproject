@@ -1,378 +1,313 @@
 # WSS Unauthorized Client – Security PoC
 
-## 1. What this PoC demonstrates
+## What this demonstrates
 
-> **Finding:** Even when the Digital Twin and Software Agent communicate over
-> **WSS (WebSocket Secure / TLS)**, a malicious client can still inject
-> schedule messages if the Agent does **not authenticate or authorise the
-> sender**.
+> **WSS (WebSocket Secure) encrypts the transport channel. It does NOT authenticate who is sending messages.**
 
-### Why WSS alone is not enough
+If the Software Agent accepts any well-formed message without verifying the sender's identity, a malicious client on the same network can send control commands — even over an encrypted WSS connection.
 
-| Protection layer | What it does | What it does NOT do |
+| Layer | What it provides | What it does NOT provide |
 |---|---|---|
-| TLS (WSS) | Encrypts data in transit, prevents eavesdropping and tampering | Does **not** verify *who* is connecting |
-| IP allow-listing (NSG) | Limits which hosts can reach the port | Can be bypassed if the attacker is on the same VNet |
-| Application-level auth | Proves the sender identity before acting | Must be implemented explicitly – it is **not** provided by TLS |
-
-This lab has **two phases**:
-
-- **Phase A (`AUTH_MODE=none`)** – Agent accepts any correctly-formed message.
-  The Attacker can disable the electrolyzer even though TLS is running.
-- **Phase B (`AUTH_MODE=token`)** – Agent requires a shared token.
-  The Attacker is rejected; the Digital Twin is still accepted.
+| TLS/WSS | Encrypted channel, integrity | Sender identity / authorisation |
+| NSG rules | Network-level filtering | Application-level authentication |
+| Token auth (Phase 2) | Proves sender identity | (must be implemented explicitly) |
 
 ---
 
-## 2. Architecture
+## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│  Azure VNet  10.0.0.0/16  (eastus)                       │
-│                                                           │
-│  ┌─────────────────────┐    WSS (TLS) :8443              │
-│  │  dt-vm  10.0.1.10   │ ──────────────────────────►     │
-│  │  Digital Twin       │                              ┌──┴──────────────────┐
-│  │  twin.py            │                              │ agent-vm 10.0.1.20  │
-│  │  sends every 10s    │                              │ Software Agent      │
-│  │                     │   SSH hop                    │ agent.py (WSS srv)  │
-│  │  [public IP]        │ ──────────────────────────►  │ AUTH_MODE=none|token│
-│  └──────────────────┬──┘                              └──┬──────────────────┘
-│          │ SSH       │                                    │
-│          │           │   WSS (TLS) :8443                  │
-│          │      ┌────▼────────────────┐                   │
-│          │      │ attacker-vm 10.0.1.30│ ─────────────────►
-│          │      │ Attacker             │
-│          │      │ attacker.py (manual) │
-│          │      └─────────────────────┘
-│          │                                                 │
-│  NSG: only admin CIDR reaches port 22 on dt-vm            │
-│       VNet traffic allowed on :8443 and :22               │
-└──────────────────────────────────────────────────────────┘
+ Azure VNet 10.0.0.0/16
+ ┌────────────────────────────────────────────────────────────────┐
+ │  twin-vm  10.0.1.10  [public IP]                            │
+ │  │  twin.py                                                 │
+ │  └── WSS :8443 ──────────────────────────────► agent-vm 10.0.1.20 │
+ │                                                  agent.py   │
+ │  attacker-vm  10.0.1.30                          WSS server │
+ │  │  attacker.py (manual)                         :8443      │
+ │  └── WSS :8443 ──────────────────────────────► (same agent)  │
+ │                                                              │
+ │  NSG: SSH from admin CIDR → twin-vm only                    │
+ │       WSS :8443 open within VNet only                       │
+ └────────────────────────────────────────────────────────────────┘
 ```
-
-**Flow (Phase A – insecure):**
-
-1. Digital Twin → Agent: `electrolyzer_enable: true` → Agent accepts → PLC: `RUNNING`
-2. Attacker → Agent: `electrolyzer_enable: false` → Agent accepts → PLC: `IDLE`
-
-**Flow (Phase B – token auth):**
-
-1. Digital Twin → Agent: message + valid token → Agent accepts → PLC: `RUNNING`
-2. Attacker → Agent: message without token → Agent **rejects** → PLC unchanged
 
 ---
 
-## 3. Cost-saving defaults
+## Prerequisites
 
-| Decision | Reason |
+- Azure subscription (`bb1cb633-bb7e-44c4-b709-189e1cceee7e`)
+- GitHub repository with Actions enabled
+- Azure App Registration with Federated OIDC credential (see setup below)
+- Azure Storage Account for Terraform state
+
+---
+
+## One-time Azure OIDC setup
+
+```bash
+# 1. Create App Registration
+az ad app create --display-name "wss-poc-github-oidc"
+APP_ID=$(az ad app list --display-name wss-poc-github-oidc --query '[0].appId' -o tsv)
+
+# 2. Create Service Principal
+az ad sp create --id $APP_ID
+
+# 3. Grant Contributor on the subscription
+az role assignment create \
+  --assignee $APP_ID \
+  --role Contributor \
+  --scope /subscriptions/bb1cb633-bb7e-44c4-b709-189e1cceee7e
+
+# 4. Add Federated Credential (replace ORG/REPO)
+az ad app federated-credential create --id $APP_ID --parameters '{
+  "name": "github-actions-poc",
+  "issuer": "https://token.actions.githubusercontent.com",
+  "subject": "repo:tusharshingrani/security_test_groupproject:ref:refs/heads/feature/poc-wss-unauthorized-client-demo",
+  "audiences": ["api://AzureADTokenExchange"]
+}'
+
+# 5. Get values for GitHub Secrets
+echo "AZURE_CLIENT_ID: $APP_ID"
+echo "AZURE_TENANT_ID: $(az account show --query tenantId -o tsv)"
+echo "AZURE_SUBSCRIPTION_ID: $(az account show --query id -o tsv)"
+```
+
+---
+
+## GitHub Secrets and Variables
+
+Go to **Settings → Secrets and variables → Actions**
+
+### Secrets (encrypted)
+
+| Name | Value |
 |---|---|
-| `Standard_B1s` VMs (1 vCPU, 1 GB RAM) | Cheapest general-purpose Linux VM in Azure; more than enough for Python WSS |
-| One public IP only (Digital Twin) | Agent and Attacker are private-only; reviewer reaches them by SSH hop from the DT |
-| No load balancer | Single-VM PoC; no HA needed |
-| No Bastion | SSH via public IP on DT is sufficient and free |
-| No Key Vault | Self-signed cert and token injected via cloud-init; acceptable for a short-lived lab |
-| No managed disks / premium storage | Standard LRS OS disks cost ~$1.50/month |
-| No availability zones | Single AZ; no SLA needed for a demo |
-| Single region | Saves cross-region data transfer costs |
+| `AZURE_CLIENT_ID` | App Registration client ID |
+| `AZURE_TENANT_ID` | Azure AD tenant ID |
+| `AZURE_SUBSCRIPTION_ID` | Azure subscription ID |
+| `SCHEDULE_TOKEN` | Any string, e.g. `my-secret-token` (token mode only) |
 
-Estimated cost: **< $10/month** for all three `Standard_B1s` VMs.
+### Variables (plain text)
 
-Set `enable_public_ip_all = true` in the pipeline variables if you need direct
-SSH to the Agent or Attacker VMs for troubleshooting (adds ~$0.004/hour per
-extra Basic public IP).
-
----
-
-## 4. Prerequisites
-
-- **Azure subscription** with Contributor access
-  (subscription ID: `bb1cb633-bb7e-44c4-b709-189e1cceee7e`)
-- **Azure DevOps** organisation and project
-- **Azure Resource Manager service connection** in the project with
-  Contributor rights on the subscription
-- **Terraform remote state storage** – a pre-existing storage account with:
-  - a resource group (e.g. `rg-tfstate`)
-  - a storage account with blob public access disabled
-  - a container named e.g. `tfstate`
-- **Your public IP/CIDR** for the `ADMIN_CIDR` variable so SSH is not
-  open to the whole internet
+| Name | Example |
+|---|---|
+| `TF_STATE_RG` | `rg-tfstate` |
+| `TF_STATE_SA` | `tfstatepoc123` |
+| `TF_STATE_CONTAINER` | `tfstate` |
+| `TF_STATE_KEY` | `wss-poc.tfstate` |
+| `ADMIN_CIDR` | `0.0.0.0/0` (restrict to your IP) |
+| `AUTH_MODE` | `none` |
 
 ---
 
-## 5. Deployment steps
+## Deployment
 
-### 5.1 Create the pipeline in Azure DevOps
+### Option A — GitHub Actions (automated)
 
-1. Go to **Pipelines → New pipeline → Azure Repos Git** (or GitHub)
-2. Select this repository
-3. Choose **Existing Azure Pipelines YAML file**
-4. Path: `pipelines/azure-pipelines.yml`
-5. Click **Continue** but do **not** run yet
+1. Push to or trigger the `feature/poc-wss-unauthorized-client-demo` branch
+2. Go to **Actions → Terraform Deploy**
+3. The workflow runs: Init → Validate → Plan → Apply
+4. After apply, check the **Terraform Outputs** step for the Digital Twin public IP
 
-### 5.2 Set pipeline variables
-
-In **Variables** (or a variable group linked to the pipeline), set:
-
-| Variable | Example value | Secret? |
-|---|---|---|
-| `ARM_SERVICE_CONNECTION` | `my-azure-sc` | No |
-| `TF_STATE_RG` | `rg-tfstate` | No |
-| `TF_STATE_SA` | `tfstatepoc123` | No |
-| `TF_STATE_CONTAINER` | `tfstate` | No |
-| `TF_STATE_KEY` | `wss-poc.tfstate` | No |
-| `LOCATION` | `eastus` | No |
-| `ADMIN_CIDR` | `203.0.113.10/32` | No |
-| `AUTH_MODE` | `none` | No |
-| `SCHEDULE_TOKEN` | `my-secret-token` | **Yes** |
-
-### 5.3 Queue the pipeline
-
-Click **Run** on the pipeline. The stages run in order:
-`Validate → Plan → Apply`
-
-After `Apply` succeeds, scroll to the **Show Terraform outputs** step to get:
-
-```
-dt_public_ip      = "x.x.x.x"
-agent_private_ip  = "10.0.1.20"
-attacker_private_ip = "10.0.1.30"
-```
-
-### 5.4 SSH into the Digital Twin
+### Option B — Azure Cloud Shell (manual, fastest)
 
 ```bash
-# Save the private key (from Terraform output)
-terraform -chdir=infra output -raw ssh_private_key_pem > poc_rsa
-chmod 600 poc_rsa
+# Open https://shell.azure.com
 
-# Connect to the Digital Twin
-ssh -i poc_rsa azureuser@<dt_public_ip>
+git clone https://github.com/tusharshingrani/security_test_groupproject
+cd security_test_groupproject
+git checkout feature/poc-wss-unauthorized-client-demo
+
+# Create tfstate storage (one-time)
+az group create -n rg-tfstate -l eastus
+SA_NAME="tfstate$(openssl rand -hex 4)"
+az storage account create -n $SA_NAME -g rg-tfstate -l eastus --sku Standard_LRS
+az storage container create -n tfstate --account-name $SA_NAME
+
+# Deploy
+cd infra
+terraform init \
+  -backend-config="resource_group_name=rg-tfstate" \
+  -backend-config="storage_account_name=$SA_NAME" \
+  -backend-config="container_name=tfstate" \
+  -backend-config="key=wss-poc.tfstate"
+
+terraform apply \
+  -var="admin_cidr=$(curl -s ifconfig.me)/32" \
+  -var="auth_mode=none" \
+  -var="schedule_token=changeme"
+
+# Get SSH access
+terraform output -raw ssh_private_key_pem > ~/poc_rsa && chmod 600 ~/poc_rsa
+terraform output twin_public_ip
 ```
 
-### 5.5 SSH hop to private VMs
-
-The SSH private key is automatically written to `~/.ssh/poc_rsa` on the
-Digital Twin VM. From the DT, hop to the Agent or Attacker:
+### SSH access
 
 ```bash
-# From the Digital Twin VM:
-ssh -i ~/.ssh/poc_rsa azureuser@10.0.1.20   # Software Agent
-ssh -i ~/.ssh/poc_rsa azureuser@10.0.1.30   # Attacker VM
+# Into the Digital Twin (only public VM)
+ssh -i ~/poc_rsa azureuser@<twin_public_ip>
+
+# Hop to Agent from the Digital Twin
+ssh -i ~/.ssh/poc_rsa azureuser@10.0.1.20
+
+# Hop to Attacker from the Digital Twin
+ssh -i ~/.ssh/poc_rsa azureuser@10.0.1.30
 ```
 
 ---
 
-## 6. Demo script
+## Demo steps
 
-### Phase A – Insecure (AUTH_MODE=none)
+### Phase 1 — Insecure (AUTH_MODE=none)
 
-#### Step 1 – Confirm Digital Twin is sending
-
-SSH to the Digital Twin VM and tail the log:
+**Step 1: Confirm the Twin is running**
 
 ```bash
-ssh -i poc_rsa azureuser@<dt_public_ip>
+# On twin-vm
 sudo tail -f /var/log/p2p-demo/twin.log
 ```
 
-You should see entries like:
-
+Expected:
 ```
-2025-01-01T12:00:00+00:00 [INFO] digital-twin: Sending schedule message schedule_id=abc-123
-2025-01-01T12:00:00+00:00 [INFO] digital-twin: Agent response: {'status': 'accepted', ...}
+Sent: {'source': 'digital-twin', 'electrolyzer_enable': True}
+Response: {'status': 'accepted'}
 ```
 
-#### Step 2 – Inspect Agent logs (Digital Twin accepted)
-
-From the Digital Twin, hop to the Agent and check logs:
+**Step 2: Check the Agent accepts the Twin**
 
 ```bash
-ssh -i ~/.ssh/poc_rsa azureuser@10.0.1.20
+# On agent-vm (hop from twin-vm)
 sudo tail -f /var/log/p2p-demo/agent.log
 ```
 
-You should see:
-
+Expected:
 ```
-[INFO]  Received message from 10.0.1.10 | source=digital-twin | electrolyzer_enable=True
-[WARNING] AUTH_MODE=none – accepting message from 10.0.1.10 (source=digital-twin) WITHOUT any authentication
-[INFO]  ACCEPTED [10.0.1.10] source=digital-twin schedule_id=abc-123 electrolyzer_enable=True
-[INFO]  PLC state updated → RUNNING
+AUTH_MODE=none: accepting from 10.0.1.10 (source=digital-twin) with NO authentication
+ACCEPTED [10.0.1.10] source=digital-twin electrolyzer_enable=True
+PLC state -> RUNNING (source=digital-twin)
 ```
 
-#### Step 3 – Run the attacker one-shot script
-
-From the Digital Twin, hop to the Attacker VM and run the attack:
+**Step 3: Run the attacker**
 
 ```bash
-ssh -i ~/.ssh/poc_rsa azureuser@10.0.1.30
-
-# Source the env vars and run the attack
+# On attacker-vm (hop from twin-vm)
 set -a; source /opt/p2p-demo/attacker.env; set +a
 python3 /opt/p2p-demo/attacker.py --once
 ```
 
-#### Step 4 – Inspect Agent logs (Attacker accepted)
+**Step 4: Agent log shows attacker also accepted**
 
-Back on the Agent VM:
+```
+AUTH_MODE=none: accepting from 10.0.1.30 (source=attacker) with NO authentication
+ACCEPTED [10.0.1.30] source=attacker electrolyzer_enable=False
+PLC state -> IDLE (source=attacker)
+```
+
+**Step 5: PLC state has been flipped**
 
 ```bash
-sudo tail -20 /var/log/p2p-demo/agent.log
-```
-
-You will see:
-
-```
-[INFO]  Received message from 10.0.1.30 | source=attacker | electrolyzer_enable=False
-[WARNING] AUTH_MODE=none – accepting message from 10.0.1.30 (source=attacker) WITHOUT any authentication. This is the vulnerability!
-[INFO]  ACCEPTED [10.0.1.30] source=attacker schedule_id=xyz-456 electrolyzer_enable=False
-[INFO]  PLC state updated → IDLE
-```
-
-#### Step 5 – Inspect PLC state
-
-```bash
+# On agent-vm
 cat /var/lib/p2p-demo/plc_state.json
 ```
 
 ```json
 {
-  "timestamp": "2025-01-01T12:00:05+00:00",
   "plc_state": "IDLE",
   "electrolyzer_enable": false,
-  "last_source": "attacker",
-  "last_schedule_id": "xyz-456"
+  "last_source": "attacker"
 }
 ```
 
-**Finding confirmed:** The attacker flipped the electrolyzer off despite WSS
-being active.
+**Finding confirmed: attacker changed PLC state despite WSS being active.**
 
 ---
 
-### Phase B – Fixed (AUTH_MODE=token)
+### Phase 2 — Secure (AUTH_MODE=token)
 
-#### Step 1 – Switch to token mode
-
-Update the `AUTH_MODE` pipeline variable to `token` and re-queue the pipeline
-(or update the env file directly):
-
-**Option A – Re-run the pipeline:**
-
-Change pipeline variable `AUTH_MODE` to `token`, then queue a new run.
-Terraform will update the env files and restart the services via cloud-init
-on a fresh `terraform apply`.
-
-**Option B – Update and restart manually (faster for demo):**
-
-On the Agent VM:
+**Option A — Redeploy via workflow/CLI:**
 
 ```bash
+terraform apply -var="auth_mode=token" -var="schedule_token=my-secret-token" -auto-approve
+```
+
+**Option B — Restart services manually (faster for live demo):**
+
+```bash
+# On agent-vm
 sudo sed -i 's/AUTH_MODE=none/AUTH_MODE=token/' /opt/p2p-demo/agent.env
-sudo systemctl restart software-agent
-```
+sudo systemctl restart agent
 
-On the Digital Twin VM:
-
-```bash
+# On twin-vm
 sudo sed -i 's/AUTH_MODE=none/AUTH_MODE=token/' /opt/p2p-demo/twin.env
-sudo systemctl restart digital-twin
+sudo systemctl restart twin
 ```
 
-#### Step 2 – Confirm Digital Twin is still accepted
-
-Agent log should show:
-
-```
-[INFO]  Token validated OK for source=digital-twin
-[INFO]  ACCEPTED [10.0.1.10] source=digital-twin schedule_id=... electrolyzer_enable=True
-[INFO]  PLC state updated → RUNNING
-```
-
-#### Step 3 – Run the attacker again
+**Now run the attacker again:**
 
 ```bash
-# On attacker-vm:
 python3 /opt/p2p-demo/attacker.py --once
 ```
 
-#### Step 4 – Confirm Attacker is rejected
+Attacker log:
+```
+Attack BLOCKED - reason: invalid or missing token
+Fix is working: AUTH_MODE=token rejected the attacker.
+```
 
 Agent log:
-
 ```
-[WARNING] REJECTED [10.0.1.30] source=attacker schedule_id=... – AUTH_MODE=token: missing or invalid token
-```
-
-Attacker log:
-
-```
-[INFO] Attack BLOCKED – Agent rejected the message. reason=invalid or missing token
-[INFO] This demonstrates the fix: AUTH_MODE=token is working correctly.
+REJECTED [10.0.1.30] source=attacker -- AUTH_MODE=token: invalid/missing token
 ```
 
-#### Step 5 – PLC state unchanged
-
-```bash
-cat /var/lib/p2p-demo/plc_state.json
-# plc_state should still be RUNNING from the Digital Twin
-```
+Twin continues to be accepted. PLC stays RUNNING.
 
 ---
 
-## 7. Cleanup
+## Cleanup
 
-**Destroy all Azure resources immediately after the demo:**
+**Destroy immediately after the demo to avoid unnecessary charges.**
 
 ```bash
-# From your local machine in the infra/ directory:
-terraform destroy \
-  -var="location=eastus" \
-  -var="admin_cidr=0.0.0.0/0" \
-  -var="auth_mode=none" \
-  -var="schedule_token=changeme"
-
-# Or via the pipeline: add a Destroy stage or run:
-# terraform destroy -auto-approve
+cd infra
+terraform destroy -auto-approve
 ```
 
-> **Reminder:** `Standard_B1s` VMs accrue charges while running.
-> Destroy the lab immediately after use. The entire resource group
-> `rg-wss-poc` can be deleted from the Azure portal as a fast alternative.
+Or delete the entire resource group from the Azure portal:
+**Resource groups → rg-wss-poc → Delete**
+
+Estimated cost: ~$0.05/hour for 3 × Standard_B1s VMs. Keep the lab running only during the demo.
 
 ---
 
-## 8. File structure
+## File structure
 
 ```
 .
-├── README.md
-├── .gitignore
-├── app/
-│   ├── requirements.txt    # Python deps (websockets)
-│   ├── common.py           # Shared helpers (logging, message schema)
-│   ├── agent.py            # WSS server – Software Agent
-│   ├── twin.py             # WSS client – Digital Twin
-│   └── attacker.py         # WSS client – Attacker (manual run)
+├── .github/workflows/
+│   └── terraform-deploy.yml  # GitHub Actions pipeline (OIDC auth)
 ├── infra/
-│   ├── versions.tf         # Provider + backend constraints
-│   ├── providers.tf        # AzureRM + TLS providers
-│   ├── variables.tf        # All configurable inputs
-│   ├── main.tf             # Resource group, SSH key, random suffix
-│   ├── network.tf          # VNet, subnet, NICs, public IPs
-│   ├── nsg.tf              # NSG + rules
-│   ├── certs.tf            # Self-signed TLS cert for WSS
-│   ├── compute.tf          # 3 VMs + cloud-init rendering
-│   ├── outputs.tf          # IPs, SSH command, SSH key
+│   ├── main.tf               # Resource group, SSH key, Terraform config
+│   ├── providers.tf          # AzureRM + TLS providers
+│   ├── variables.tf          # All inputs
+│   ├── network.tf            # VNet, subnet, NICs, public IPs
+│   ├── nsg.tf                # NSG rules
+│   ├── certs.tf              # Self-signed WSS cert
+│   ├── compute.tf            # 3 VMs + cloud-init
+│   ├── outputs.tf            # IPs, SSH command
 │   └── cloud-init/
-│       ├── software-agent.yaml.tftpl
-│       ├── digital-twin.yaml.tftpl
+│       ├── agent.yaml.tftpl
+│       ├── twin.yaml.tftpl
 │       └── attacker.yaml.tftpl
+├── app/
+│   ├── agent.py              # WSS server (vulnerability + fix)
+│   ├── twin.py               # Legitimate WSS client
+│   ├── attacker.py           # Malicious WSS client
+│   └── requirements.txt
 ├── systemd/
-│   ├── software-agent.service
-│   ├── digital-twin.service
-│   └── attacker.service
-└── pipelines/
-    └── azure-pipelines.yml
+│   ├── agent.service
+│   ├── twin.service
+│   └── attacker.service      # Installed but NOT enabled
+└── README.md
 ```
