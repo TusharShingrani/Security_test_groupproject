@@ -1,13 +1,9 @@
-# ─── Virtual Network ─────────────────────────────────────────────────────────
-
 resource "azurerm_virtual_network" "poc" {
   name                = "vnet-wss-poc"
   location            = azurerm_resource_group.poc.location
   resource_group_name = azurerm_resource_group.poc.name
   address_space       = [var.vnet_address_space]
 }
-
-# ─── Subnet ──────────────────────────────────────────────────────────────────
 
 resource "azurerm_subnet" "poc" {
   name                 = "snet-poc"
@@ -16,12 +12,11 @@ resource "azurerm_subnet" "poc" {
   address_prefixes     = [var.subnet_prefix]
 }
 
-# ─── Public IPs ──────────────────────────────────────────────────────────────
-# By default only the Digital Twin gets a public IP.
-# Set enable_public_ip_all=true to get public IPs on all VMs (troubleshooting).
+# ── Public IPs ────────────────────────────────────────────────────────────────
+# Only the Digital Twin gets a public IP by default.
 
-resource "azurerm_public_ip" "dt" {
-  name                = "pip-dt"
+resource "azurerm_public_ip" "twin" {
+  name                = "pip-twin"
   location            = azurerm_resource_group.poc.location
   resource_group_name = azurerm_resource_group.poc.name
   allocation_method   = "Static"
@@ -46,10 +41,10 @@ resource "azurerm_public_ip" "attacker" {
   sku                 = "Basic"
 }
 
-# ─── NICs ────────────────────────────────────────────────────────────────────
+# ── NICs ─────────────────────────────────────────────────────────────────────
 
-resource "azurerm_network_interface" "dt" {
-  name                = "nic-dt"
+resource "azurerm_network_interface" "twin" {
+  name                = "nic-twin"
   location            = azurerm_resource_group.poc.location
   resource_group_name = azurerm_resource_group.poc.name
 
@@ -58,7 +53,7 @@ resource "azurerm_network_interface" "dt" {
     subnet_id                     = azurerm_subnet.poc.id
     private_ip_address_allocation = "Static"
     private_ip_address            = "10.0.1.10"
-    public_ip_address_id          = azurerm_public_ip.dt.id
+    public_ip_address_id          = azurerm_public_ip.twin.id
   }
 }
 
@@ -90,10 +85,10 @@ resource "azurerm_network_interface" "attacker" {
   }
 }
 
-# ─── NSG associations ────────────────────────────────────────────────────────
+# ── NSG associations ─────────────────────────────────────────────────────────
 
-resource "azurerm_network_interface_security_group_association" "dt" {
-  network_interface_id      = azurerm_network_interface.dt.id
+resource "azurerm_network_interface_security_group_association" "twin" {
+  network_interface_id      = azurerm_network_interface.twin.id
   network_security_group_id = azurerm_network_security_group.poc.id
 }
 

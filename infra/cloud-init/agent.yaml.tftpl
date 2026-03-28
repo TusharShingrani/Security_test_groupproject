@@ -11,32 +11,41 @@ write_files:
     content: |
       ${indent(6, requirements_txt)}
 
-  - path: /opt/p2p-demo/attacker.py
+  - path: /opt/p2p-demo/agent.py
     permissions: "0755"
     content: |
-      ${indent(6, attacker_py)}
+      ${indent(6, agent_py)}
 
   - path: /opt/p2p-demo/certs/server.crt
     permissions: "0644"
     content: |
       ${indent(6, server_cert_pem)}
 
-  - path: /opt/p2p-demo/attacker.env
+  - path: /opt/p2p-demo/certs/server.key
     permissions: "0600"
     content: |
-      AGENT_HOST=${agent_private_ip}
+      ${indent(6, server_key_pem)}
+
+  - path: /opt/p2p-demo/agent.env
+    permissions: "0600"
+    content: |
+      AUTH_MODE=${auth_mode}
+      SCHEDULE_TOKEN=${schedule_token}
       WSS_PORT=${wss_port}
-      CA_CERT_PATH=/opt/p2p-demo/certs/server.crt
+      CERT_PATH=/opt/p2p-demo/certs/server.crt
+      KEY_PATH=/opt/p2p-demo/certs/server.key
+      STATE_DIR=/var/lib/p2p-demo
       LOG_DIR=/var/log/p2p-demo
 
-  - path: /etc/systemd/system/attacker.service
+  - path: /etc/systemd/system/agent.service
     permissions: "0644"
     content: |
-      ${indent(6, attacker_service)}
+      ${indent(6, agent_service)}
 
 runcmd:
-  - mkdir -p /var/log/p2p-demo
+  - mkdir -p /var/lib/p2p-demo /var/log/p2p-demo
   - python3 -m venv /opt/p2p-demo/venv
   - /opt/p2p-demo/venv/bin/pip install --quiet -r /opt/p2p-demo/requirements.txt
   - systemctl daemon-reload
-  # Attacker service is installed but NOT started - run manually for the demo
+  - systemctl enable agent
+  - systemctl start agent

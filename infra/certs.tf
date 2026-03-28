@@ -1,11 +1,5 @@
-# ─── WSS Certificate (self-signed, PoC only) ─────────────────────────────────
-# Terraform generates a server key + self-signed cert.
-# The cert is injected into all three VMs via cloud-init:
-#   - Agent VM:          server key + cert (to terminate TLS)
-#   - DT & Attacker VMs: cert only (to verify the server)
-#
-# This proves WSS is working.  Client authentication is deliberately absent
-# in AUTH_MODE=none to demonstrate the vulnerability.
+# Self-signed TLS cert for the WSS server.
+# Proves transport is encrypted. Client auth is intentionally absent (Phase 1).
 
 resource "tls_private_key" "agent_server" {
   algorithm = "RSA"
@@ -17,13 +11,12 @@ resource "tls_self_signed_cert" "agent_server" {
 
   subject {
     common_name  = "agent-vm"
-    organization = "WSS-PoC"
+    organization = "wss-poc"
   }
 
-  # Valid for 30 days – enough for any PoC lifecycle.
   validity_period_hours = 720
 
-  # The cert must cover the private IP so TLS hostname verification works.
+  # Cover the agent's static private IP for TLS verification
   ip_addresses = ["10.0.1.20"]
 
   allowed_uses = [

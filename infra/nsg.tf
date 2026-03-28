@@ -1,15 +1,9 @@
-# ─── Network Security Group ───────────────────────────────────────────────────
-# One NSG applied to all three VMs.
-# Rules follow the principle of least privilege for this PoC.
-
 resource "azurerm_network_security_group" "poc" {
   name                = "nsg-wss-poc"
   location            = azurerm_resource_group.poc.location
   resource_group_name = azurerm_resource_group.poc.name
 
-  # ── Inbound ──────────────────────────────────────────────────────────────
-
-  # Allow SSH from reviewer/admin only (targets the Digital Twin public IP).
+  # Allow SSH from admin only (targets Digital Twin public IP)
   security_rule {
     name                       = "allow-ssh-admin"
     priority                   = 100
@@ -22,8 +16,7 @@ resource "azurerm_network_security_group" "poc" {
     destination_address_prefix = "*"
   }
 
-  # Allow WSS (8443) from within the VNet only – Digital Twin and Attacker
-  # talk to the Agent over private IPs.
+  # Allow WSS (8443) from within the VNet
   security_rule {
     name                       = "allow-wss-vnet"
     priority                   = 110
@@ -36,8 +29,7 @@ resource "azurerm_network_security_group" "poc" {
     destination_address_prefix = "*"
   }
 
-  # Allow SSH between VMs inside the VNet so the Digital Twin can hop to
-  # the private VMs during the demo.
+  # Allow SSH between VMs for hop access
   security_rule {
     name                       = "allow-ssh-vnet"
     priority                   = 120
@@ -50,9 +42,9 @@ resource "azurerm_network_security_group" "poc" {
     destination_address_prefix = "*"
   }
 
-  # Deny all other inbound internet traffic explicitly.
+  # Block all other internet inbound
   security_rule {
-    name                       = "deny-inbound-internet"
+    name                       = "deny-internet-inbound"
     priority                   = 4000
     direction                  = "Inbound"
     access                     = "Deny"
@@ -63,11 +55,9 @@ resource "azurerm_network_security_group" "poc" {
     destination_address_prefix = "*"
   }
 
-  # ── Outbound ─────────────────────────────────────────────────────────────
-  # Allow all outbound so VMs can pull packages from apt/pypi on first boot.
-  # In a tighter environment you would restrict this too.
+  # Allow all outbound so VMs can pull packages on first boot
   security_rule {
-    name                       = "allow-outbound-all"
+    name                       = "allow-outbound"
     priority                   = 100
     direction                  = "Outbound"
     access                     = "Allow"
