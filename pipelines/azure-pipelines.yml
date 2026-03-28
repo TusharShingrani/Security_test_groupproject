@@ -1,20 +1,22 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Azure DevOps Pipeline – WSS Unauthorized Client PoC
 #
-# This pipeline provisions the 3-VM Azure lab with one queue run.
-# All sensitive values are stored as Azure DevOps pipeline variables or a
-# variable group – nothing is hardcoded in this file.
+# Uses plain bash + the official HashiCorp Terraform install script.
+# No marketplace extensions required (no TerraformInstaller / TerraformTaskV4).
+#
+# Azure credentials are passed via an AzureCLI task (service connection) so
+# ARM_* environment variables are injected automatically by the hosted agent.
 #
 # Required pipeline variables (set in the pipeline UI or a variable group):
-#   TF_STATE_RG          – resource group that holds the tfstate storage account
-#   TF_STATE_SA          – storage account name for tfstate
-#   TF_STATE_CONTAINER   – blob container name for tfstate
-#   TF_STATE_KEY         – blob name, e.g. wss-poc.tfstate
 #   ARM_SERVICE_CONNECTION – name of the Azure Resource Manager service connection
-#   ADMIN_CIDR           – CIDR allowed to SSH to the Digital Twin, e.g. 1.2.3.4/32
-#   LOCATION             – Azure region, e.g. eastus
-#   AUTH_MODE            – "none" (default) or "token"
-#   SCHEDULE_TOKEN       – (secret) shared token; only used when AUTH_MODE=token
+#   TF_STATE_RG            – resource group that holds the tfstate storage account
+#   TF_STATE_SA            – storage account name for tfstate
+#   TF_STATE_CONTAINER     – blob container name for tfstate
+#   TF_STATE_KEY           – blob name, e.g. wss-poc.tfstate
+#   ADMIN_CIDR             – CIDR allowed to SSH to the Digital Twin, e.g. 1.2.3.4/32
+#   LOCATION               – Azure region, e.g. eastus
+#   AUTH_MODE              – "none" (default) or "token"
+#   SCHEDULE_TOKEN         – (secret) shared token; only used when AUTH_MODE=token
 # ─────────────────────────────────────────────────────────────────────────────
 
 trigger:
@@ -22,19 +24,21 @@ trigger:
     include:
       - feature/poc-wss-unauthorized-client-demo
 
-pr: none   # don't run on PRs – this deploys real infra
+pr: none   # don't run on PRs – this deploys real infrastructure
 
 pool:
   vmImage: ubuntu-latest
 
 variables:
-  # Terraform working directory
-  TF_DIR: $(System.DefaultWorkingDirectory)/infra
-
-  # Defaults – override via pipeline UI variables
+  TF_DIR:     $(System.DefaultWorkingDirectory)/infra
+  TF_VERSION: "1.8.5"
   LOCATION:   "eastus"
   AUTH_MODE:  "none"
-  ADMIN_CIDR: "0.0.0.0/0"   # reviewer should tighten this to their own IP
+  ADMIN_CIDR: "0.0.0.0/0"   # tighten to your own IP for real use
+
+# ─── Reusable step template: install Terraform ───────────────────────────────
+# Azure-hosted ubuntu-latest agents do not have Terraform pre-installed.
+# We install it once per job via the official HashiCorp APT repo.
 
 stages:
 
@@ -46,39 +50,64 @@ stages:
         displayName: "fmt / init / validate"
         steps:
 
-          - task: TerraformInstaller@1
-            displayName: "Install Terraform"
-            inputs:
-              terraformVersion: "latest"
+          - checkout: self
 
-          - task: TerraformTaskV4@4
+          # Install Terraform from HashiCorp APT – no marketplace extension needed
+          - script: |
+              set -euo pipefail
+              wget -q -O- https://apt.releases.hashicorp.com/gpg \
+                | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+              echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] \
+                https://apt.releases.hashicorp.com $(lsb_release -cs) main" \
+                | sudo tee /etc/apt/sources.list.d/hashicorp.list
+              sudo apt-get update -qq
+              sudo apt-get install -y terraform=$(TF_VERSION)-*
+              terraform version
+            displayName: "Install Terraform $(TF_VERSION)"
+
+          - script: |
+              set -euo pipefail
+              cd $(TF_DIR)
+              terraform fmt -check -recursive
             displayName: "terraform fmt -check"
-            inputs:
-              provider: "azurerm"
-              command: "custom"
-              customCommand: "fmt"
-              commandOptions: "-check -recursive"
-              workingDirectory: $(TF_DIR)
 
-          - task: TerraformTaskV4@4
+          # AzureCLI task injects ARM_CLIENT_ID / ARM_CLIENT_SECRET / ARM_TENANT_ID
+          # / ARM_SUBSCRIPTION_ID into the environment automatically.
+          - task: AzureCLI@2
             displayName: "terraform init"
             inputs:
-              provider: "azurerm"
-              command: "init"
-              workingDirectory: $(TF_DIR)
-              backendServiceArm: $(ARM_SERVICE_CONNECTION)
-              backendAzureRmResourceGroupName:  $(TF_STATE_RG)
-              backendAzureRmStorageAccountName: $(TF_STATE_SA)
-              backendAzureRmContainerName:      $(TF_STATE_CONTAINER)
-              backendAzureRmKey:                $(TF_STATE_KEY)
+              azureSubscription: $(ARM_SERVICE_CONNECTION)
+              scriptType: bash
+              scriptLocation: inlineScript
+              addSpnToEnvironment: true   # injects ARM_* env vars
+              inlineScript: |
+                set -euo pipefail
+                export ARM_CLIENT_ID=$servicePrincipalId
+                export ARM_CLIENT_SECRET=$servicePrincipalKey
+                export ARM_TENANT_ID=$tenantId
+                export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+                cd $(TF_DIR)
+                terraform init \
+                  -backend-config="resource_group_name=$(TF_STATE_RG)" \
+                  -backend-config="storage_account_name=$(TF_STATE_SA)" \
+                  -backend-config="container_name=$(TF_STATE_CONTAINER)" \
+                  -backend-config="key=$(TF_STATE_KEY)"
 
-          - task: TerraformTaskV4@4
+          - task: AzureCLI@2
             displayName: "terraform validate"
             inputs:
-              provider: "azurerm"
-              command: "validate"
-              workingDirectory: $(TF_DIR)
-              environmentServiceNameAzureRM: $(ARM_SERVICE_CONNECTION)
+              azureSubscription: $(ARM_SERVICE_CONNECTION)
+              scriptType: bash
+              scriptLocation: inlineScript
+              addSpnToEnvironment: true
+              inlineScript: |
+                set -euo pipefail
+                export ARM_CLIENT_ID=$servicePrincipalId
+                export ARM_CLIENT_SECRET=$servicePrincipalKey
+                export ARM_TENANT_ID=$tenantId
+                export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+                cd $(TF_DIR)
+                terraform validate
 
   # ── Stage 2: Plan ─────────────────────────────────────────────────────────────
   - stage: Plan
@@ -89,36 +118,45 @@ stages:
         displayName: "plan"
         steps:
 
-          - task: TerraformInstaller@1
-            displayName: "Install Terraform"
-            inputs:
-              terraformVersion: "latest"
+          - checkout: self
 
-          - task: TerraformTaskV4@4
-            displayName: "terraform init"
-            inputs:
-              provider: "azurerm"
-              command: "init"
-              workingDirectory: $(TF_DIR)
-              backendServiceArm: $(ARM_SERVICE_CONNECTION)
-              backendAzureRmResourceGroupName:  $(TF_STATE_RG)
-              backendAzureRmStorageAccountName: $(TF_STATE_SA)
-              backendAzureRmContainerName:      $(TF_STATE_CONTAINER)
-              backendAzureRmKey:                $(TF_STATE_KEY)
+          - script: |
+              set -euo pipefail
+              wget -q -O- https://apt.releases.hashicorp.com/gpg \
+                | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+              echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] \
+                https://apt.releases.hashicorp.com $(lsb_release -cs) main" \
+                | sudo tee /etc/apt/sources.list.d/hashicorp.list
+              sudo apt-get update -qq
+              sudo apt-get install -y terraform=$(TF_VERSION)-*
+              terraform version
+            displayName: "Install Terraform $(TF_VERSION)"
 
-          - task: TerraformTaskV4@4
-            displayName: "terraform plan"
+          - task: AzureCLI@2
+            displayName: "terraform init + plan"
             inputs:
-              provider: "azurerm"
-              command: "plan"
-              workingDirectory: $(TF_DIR)
-              environmentServiceNameAzureRM: $(ARM_SERVICE_CONNECTION)
-              commandOptions: >-
-                -var="location=$(LOCATION)"
-                -var="admin_cidr=$(ADMIN_CIDR)"
-                -var="auth_mode=$(AUTH_MODE)"
-                -var="schedule_token=$(SCHEDULE_TOKEN)"
-                -out=$(TF_DIR)/tfplan
+              azureSubscription: $(ARM_SERVICE_CONNECTION)
+              scriptType: bash
+              scriptLocation: inlineScript
+              addSpnToEnvironment: true
+              inlineScript: |
+                set -euo pipefail
+                export ARM_CLIENT_ID=$servicePrincipalId
+                export ARM_CLIENT_SECRET=$servicePrincipalKey
+                export ARM_TENANT_ID=$tenantId
+                export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+                cd $(TF_DIR)
+                terraform init \
+                  -backend-config="resource_group_name=$(TF_STATE_RG)" \
+                  -backend-config="storage_account_name=$(TF_STATE_SA)" \
+                  -backend-config="container_name=$(TF_STATE_CONTAINER)" \
+                  -backend-config="key=$(TF_STATE_KEY)"
+                terraform plan \
+                  -var="location=$(LOCATION)" \
+                  -var="admin_cidr=$(ADMIN_CIDR)" \
+                  -var="auth_mode=$(AUTH_MODE)" \
+                  -var="schedule_token=$(SCHEDULE_TOKEN)" \
+                  -out=tfplan -no-color | tee plan.txt
 
           - publish: $(TF_DIR)/tfplan
             artifact: terraform-plan
@@ -128,13 +166,17 @@ stages:
   - stage: Apply
     displayName: "Terraform apply"
     dependsOn: Plan
-    # Gate: only auto-apply on the feature branch; add a manual approval for
-    # production-like environments.
-    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/feature/poc-wss-unauthorized-client-demo'))
+    condition: >
+      and(
+        succeeded(),
+        eq(variables['Build.SourceBranch'],
+           'refs/heads/feature/poc-wss-unauthorized-client-demo')
+      )
     jobs:
       - deployment: TerraformApply
         displayName: "apply"
-        environment: "wss-poc-lab"   # create this environment in Azure DevOps for optional approval gates
+        # Create this environment in Azure DevOps to add optional approval gates.
+        environment: "wss-poc-lab"
         strategy:
           runOnce:
             deploy:
@@ -142,44 +184,57 @@ stages:
 
                 - checkout: self
 
-                - task: TerraformInstaller@1
-                  displayName: "Install Terraform"
-                  inputs:
-                    terraformVersion: "latest"
-
-                - task: TerraformTaskV4@4
-                  displayName: "terraform init"
-                  inputs:
-                    provider: "azurerm"
-                    command: "init"
-                    workingDirectory: $(TF_DIR)
-                    backendServiceArm: $(ARM_SERVICE_CONNECTION)
-                    backendAzureRmResourceGroupName:  $(TF_STATE_RG)
-                    backendAzureRmStorageAccountName: $(TF_STATE_SA)
-                    backendAzureRmContainerName:      $(TF_STATE_CONTAINER)
-                    backendAzureRmKey:                $(TF_STATE_KEY)
-
-                - task: TerraformTaskV4@4
-                  displayName: "terraform apply"
-                  inputs:
-                    provider: "azurerm"
-                    command: "apply"
-                    workingDirectory: $(TF_DIR)
-                    environmentServiceNameAzureRM: $(ARM_SERVICE_CONNECTION)
-                    commandOptions: >-
-                      -auto-approve
-                      -var="location=$(LOCATION)"
-                      -var="admin_cidr=$(ADMIN_CIDR)"
-                      -var="auth_mode=$(AUTH_MODE)"
-                      -var="schedule_token=$(SCHEDULE_TOKEN)"
-
                 - script: |
-                    cd $(TF_DIR)
-                    echo "##[section]Terraform Outputs"
-                    terraform output -no-color
+                    set -euo pipefail
+                    wget -q -O- https://apt.releases.hashicorp.com/gpg \
+                      | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+                    echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] \
+                      https://apt.releases.hashicorp.com $(lsb_release -cs) main" \
+                      | sudo tee /etc/apt/sources.list.d/hashicorp.list
+                    sudo apt-get update -qq
+                    sudo apt-get install -y terraform=$(TF_VERSION)-*
+                    terraform version
+                  displayName: "Install Terraform $(TF_VERSION)"
+
+                - task: AzureCLI@2
+                  displayName: "terraform init + apply"
+                  inputs:
+                    azureSubscription: $(ARM_SERVICE_CONNECTION)
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    addSpnToEnvironment: true
+                    inlineScript: |
+                      set -euo pipefail
+                      export ARM_CLIENT_ID=$servicePrincipalId
+                      export ARM_CLIENT_SECRET=$servicePrincipalKey
+                      export ARM_TENANT_ID=$tenantId
+                      export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+                      cd $(TF_DIR)
+                      terraform init \
+                        -backend-config="resource_group_name=$(TF_STATE_RG)" \
+                        -backend-config="storage_account_name=$(TF_STATE_SA)" \
+                        -backend-config="container_name=$(TF_STATE_CONTAINER)" \
+                        -backend-config="key=$(TF_STATE_KEY)"
+                      terraform apply \
+                        -auto-approve \
+                        -var="location=$(LOCATION)" \
+                        -var="admin_cidr=$(ADMIN_CIDR)" \
+                        -var="auth_mode=$(AUTH_MODE)" \
+                        -var="schedule_token=$(SCHEDULE_TOKEN)"
+
+                - task: AzureCLI@2
                   displayName: "Show Terraform outputs"
-                  env:
-                    ARM_CLIENT_ID:       $(ARM_CLIENT_ID)
-                    ARM_CLIENT_SECRET:   $(ARM_CLIENT_SECRET)
-                    ARM_TENANT_ID:       $(ARM_TENANT_ID)
-                    ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+                  inputs:
+                    azureSubscription: $(ARM_SERVICE_CONNECTION)
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    addSpnToEnvironment: true
+                    inlineScript: |
+                      set -euo pipefail
+                      export ARM_CLIENT_ID=$servicePrincipalId
+                      export ARM_CLIENT_SECRET=$servicePrincipalKey
+                      export ARM_TENANT_ID=$tenantId
+                      export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+                      cd $(TF_DIR)
+                      echo "##[section]Terraform Outputs"
+                      terraform output -no-color
