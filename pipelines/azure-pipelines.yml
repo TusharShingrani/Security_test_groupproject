@@ -1,0 +1,185 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Azure DevOps Pipeline – WSS Unauthorized Client PoC
+#
+# This pipeline provisions the 3-VM Azure lab with one queue run.
+# All sensitive values are stored as Azure DevOps pipeline variables or a
+# variable group – nothing is hardcoded in this file.
+#
+# Required pipeline variables (set in the pipeline UI or a variable group):
+#   TF_STATE_RG          – resource group that holds the tfstate storage account
+#   TF_STATE_SA          – storage account name for tfstate
+#   TF_STATE_CONTAINER   – blob container name for tfstate
+#   TF_STATE_KEY         – blob name, e.g. wss-poc.tfstate
+#   ARM_SERVICE_CONNECTION – name of the Azure Resource Manager service connection
+#   ADMIN_CIDR           – CIDR allowed to SSH to the Digital Twin, e.g. 1.2.3.4/32
+#   LOCATION             – Azure region, e.g. eastus
+#   AUTH_MODE            – "none" (default) or "token"
+#   SCHEDULE_TOKEN       – (secret) shared token; only used when AUTH_MODE=token
+# ─────────────────────────────────────────────────────────────────────────────
+
+trigger:
+  branches:
+    include:
+      - feature/poc-wss-unauthorized-client-demo
+
+pr: none   # don't run on PRs – this deploys real infra
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  # Terraform working directory
+  TF_DIR: $(System.DefaultWorkingDirectory)/infra
+
+  # Defaults – override via pipeline UI variables
+  LOCATION:   "eastus"
+  AUTH_MODE:  "none"
+  ADMIN_CIDR: "0.0.0.0/0"   # reviewer should tighten this to their own IP
+
+stages:
+
+  # ── Stage 1: Validate ────────────────────────────────────────────────────────
+  - stage: Validate
+    displayName: "Terraform fmt + validate"
+    jobs:
+      - job: TerraformValidate
+        displayName: "fmt / init / validate"
+        steps:
+
+          - task: TerraformInstaller@1
+            displayName: "Install Terraform"
+            inputs:
+              terraformVersion: "latest"
+
+          - task: TerraformTaskV4@4
+            displayName: "terraform fmt -check"
+            inputs:
+              provider: "azurerm"
+              command: "custom"
+              customCommand: "fmt"
+              commandOptions: "-check -recursive"
+              workingDirectory: $(TF_DIR)
+
+          - task: TerraformTaskV4@4
+            displayName: "terraform init"
+            inputs:
+              provider: "azurerm"
+              command: "init"
+              workingDirectory: $(TF_DIR)
+              backendServiceArm: $(ARM_SERVICE_CONNECTION)
+              backendAzureRmResourceGroupName:  $(TF_STATE_RG)
+              backendAzureRmStorageAccountName: $(TF_STATE_SA)
+              backendAzureRmContainerName:      $(TF_STATE_CONTAINER)
+              backendAzureRmKey:                $(TF_STATE_KEY)
+
+          - task: TerraformTaskV4@4
+            displayName: "terraform validate"
+            inputs:
+              provider: "azurerm"
+              command: "validate"
+              workingDirectory: $(TF_DIR)
+              environmentServiceNameAzureRM: $(ARM_SERVICE_CONNECTION)
+
+  # ── Stage 2: Plan ─────────────────────────────────────────────────────────────
+  - stage: Plan
+    displayName: "Terraform plan"
+    dependsOn: Validate
+    jobs:
+      - job: TerraformPlan
+        displayName: "plan"
+        steps:
+
+          - task: TerraformInstaller@1
+            displayName: "Install Terraform"
+            inputs:
+              terraformVersion: "latest"
+
+          - task: TerraformTaskV4@4
+            displayName: "terraform init"
+            inputs:
+              provider: "azurerm"
+              command: "init"
+              workingDirectory: $(TF_DIR)
+              backendServiceArm: $(ARM_SERVICE_CONNECTION)
+              backendAzureRmResourceGroupName:  $(TF_STATE_RG)
+              backendAzureRmStorageAccountName: $(TF_STATE_SA)
+              backendAzureRmContainerName:      $(TF_STATE_CONTAINER)
+              backendAzureRmKey:                $(TF_STATE_KEY)
+
+          - task: TerraformTaskV4@4
+            displayName: "terraform plan"
+            inputs:
+              provider: "azurerm"
+              command: "plan"
+              workingDirectory: $(TF_DIR)
+              environmentServiceNameAzureRM: $(ARM_SERVICE_CONNECTION)
+              commandOptions: >-
+                -var="location=$(LOCATION)"
+                -var="admin_cidr=$(ADMIN_CIDR)"
+                -var="auth_mode=$(AUTH_MODE)"
+                -var="schedule_token=$(SCHEDULE_TOKEN)"
+                -out=$(TF_DIR)/tfplan
+
+          - publish: $(TF_DIR)/tfplan
+            artifact: terraform-plan
+            displayName: "Publish plan artifact"
+
+  # ── Stage 3: Apply ────────────────────────────────────────────────────────────
+  - stage: Apply
+    displayName: "Terraform apply"
+    dependsOn: Plan
+    # Gate: only auto-apply on the feature branch; add a manual approval for
+    # production-like environments.
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/feature/poc-wss-unauthorized-client-demo'))
+    jobs:
+      - deployment: TerraformApply
+        displayName: "apply"
+        environment: "wss-poc-lab"   # create this environment in Azure DevOps for optional approval gates
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+
+                - checkout: self
+
+                - task: TerraformInstaller@1
+                  displayName: "Install Terraform"
+                  inputs:
+                    terraformVersion: "latest"
+
+                - task: TerraformTaskV4@4
+                  displayName: "terraform init"
+                  inputs:
+                    provider: "azurerm"
+                    command: "init"
+                    workingDirectory: $(TF_DIR)
+                    backendServiceArm: $(ARM_SERVICE_CONNECTION)
+                    backendAzureRmResourceGroupName:  $(TF_STATE_RG)
+                    backendAzureRmStorageAccountName: $(TF_STATE_SA)
+                    backendAzureRmContainerName:      $(TF_STATE_CONTAINER)
+                    backendAzureRmKey:                $(TF_STATE_KEY)
+
+                - task: TerraformTaskV4@4
+                  displayName: "terraform apply"
+                  inputs:
+                    provider: "azurerm"
+                    command: "apply"
+                    workingDirectory: $(TF_DIR)
+                    environmentServiceNameAzureRM: $(ARM_SERVICE_CONNECTION)
+                    commandOptions: >-
+                      -auto-approve
+                      -var="location=$(LOCATION)"
+                      -var="admin_cidr=$(ADMIN_CIDR)"
+                      -var="auth_mode=$(AUTH_MODE)"
+                      -var="schedule_token=$(SCHEDULE_TOKEN)"
+
+                - script: |
+                    cd $(TF_DIR)
+                    echo "##[section]Terraform Outputs"
+                    terraform output -no-color
+                  displayName: "Show Terraform outputs"
+                  env:
+                    ARM_CLIENT_ID:       $(ARM_CLIENT_ID)
+                    ARM_CLIENT_SECRET:   $(ARM_CLIENT_SECRET)
+                    ARM_TENANT_ID:       $(ARM_TENANT_ID)
+                    ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
