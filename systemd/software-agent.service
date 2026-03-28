@@ -1,0 +1,19 @@
+[Unit]
+Description=WSS Software Agent – PoC for unauthorized client demo
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/p2p-demo
+EnvironmentFile=/opt/p2p-demo/agent.env
+ExecStart=/opt/p2p-demo/venv/bin/python3 /opt/p2p-demo/agent.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=software-agent
+
+[Install]
+WantedBy=multi-user.target
