@@ -1,0 +1,44 @@
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.backup
+*.tfplan
+tfplan
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Terraform crash log
+crash.log
+
+# Sensitive variable files – never commit these
+*.tfvars
+*.tfvars.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+env/
+.env
+*.egg-info/
+dist/
+build/
+
+# SSH keys – never commit private keys
+*.pem
+*.key
+poc_rsa
+id_rsa
+id_ed25519
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
