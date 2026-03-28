@@ -1,7 +1,6 @@
 [Unit]
-Description=Attacker WSS client – PoC for unauthorized client demo (manual trigger only)
+Description=Attacker WSS client (manual trigger only)
 After=network-online.target
-Wants=network-online.target
 
 [Service]
 Type=oneshot
@@ -11,12 +10,9 @@ EnvironmentFile=/opt/p2p-demo/attacker.env
 ExecStart=/opt/p2p-demo/venv/bin/python3 /opt/p2p-demo/attacker.py --once
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=attacker
 
-# NOTE: This service is installed but NOT enabled.
-# Trigger the demo manually:
-#   python3 /opt/p2p-demo/attacker.py --once
-#   python3 /opt/p2p-demo/attacker.py --loop
+# This service is intentionally NOT enabled.
+# Run the attack manually: python3 /opt/p2p-demo/attacker.py --once
 
 [Install]
 WantedBy=multi-user.target

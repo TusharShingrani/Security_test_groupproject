@@ -1,0 +1,18 @@
+[Unit]
+Description=Digital Twin WSS client
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/p2p-demo
+EnvironmentFile=/opt/p2p-demo/twin.env
+ExecStart=/opt/p2p-demo/venv/bin/python3 /opt/p2p-demo/twin.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

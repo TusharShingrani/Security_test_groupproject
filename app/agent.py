@@ -1,171 +1,141 @@
 #!/usr/bin/env python3
 """
-agent.py – WSS Software Agent (server side).
+agent.py - WSS Software Agent server.
 
-Security finding demonstrated:
-  Phase A (AUTH_MODE=none):  accepts any properly-formed message regardless
-                             of sender identity.
-  Phase B (AUTH_MODE=token): rejects messages whose token doesn't match
-                             the expected SCHEDULE_TOKEN env var.
+Demonstrates the security finding:
+  AUTH_MODE=none  -> accepts ANY sender (vulnerability)
+  AUTH_MODE=token -> requires matching token (fix)
 
-Environment variables (set via /opt/p2p-demo/agent.env and the systemd unit):
-  AUTH_MODE       - "none" | "token"  (default: none)
-  SCHEDULE_TOKEN  - shared secret used in token mode
-  WSS_PORT        - port to listen on              (default: 8443)
-  CERT_PATH       - path to TLS server certificate (default: certs/server.crt)
-  KEY_PATH        - path to TLS server private key (default: certs/server.key)
-  STATE_DIR       - directory for plc_state.json   (default: /var/lib/p2p-demo)
-  LOG_DIR         - directory for agent.log         (default: /var/log/p2p-demo)
+Env vars (from agent.env):
+  AUTH_MODE, SCHEDULE_TOKEN, WSS_PORT, CERT_PATH, KEY_PATH,
+  STATE_DIR, LOG_DIR
 """
 
 import asyncio
 import json
+import logging
 import os
 import ssl
 import sys
+from datetime import datetime, timezone
 
 import websockets
 
-# Append the app directory to path so common.py is importable when run
-# directly or as a systemd service.
-sys.path.insert(0, os.path.dirname(__file__))
-from common import setup_logger, validate_message, utc_now
+# ── Config ──────────────────────────────────────────────────────────────────
 
-# ─── Configuration from environment ──────────────────────────────────────────
+AUTH_MODE      = os.environ.get("AUTH_MODE", "none").lower()
+SCHEDULE_TOKEN = os.environ.get("SCHEDULE_TOKEN", "")
+WSS_PORT       = int(os.environ.get("WSS_PORT", "8443"))
+CERT_PATH      = os.environ.get("CERT_PATH", "/opt/p2p-demo/certs/server.crt")
+KEY_PATH       = os.environ.get("KEY_PATH",  "/opt/p2p-demo/certs/server.key")
+STATE_DIR      = os.environ.get("STATE_DIR", "/var/lib/p2p-demo")
+LOG_DIR        = os.environ.get("LOG_DIR",   "/var/log/p2p-demo")
 
-AUTH_MODE       = os.environ.get("AUTH_MODE", "none").lower()
-SCHEDULE_TOKEN  = os.environ.get("SCHEDULE_TOKEN", "")
-WSS_PORT        = int(os.environ.get("WSS_PORT", "8443"))
-CERT_PATH       = os.environ.get("CERT_PATH", "/opt/p2p-demo/certs/server.crt")
-KEY_PATH        = os.environ.get("KEY_PATH",  "/opt/p2p-demo/certs/server.key")
-STATE_DIR       = os.environ.get("STATE_DIR", "/var/lib/p2p-demo")
-LOG_DIR         = os.environ.get("LOG_DIR",   "/var/log/p2p-demo")
-
-LOG_FILE   = os.path.join(LOG_DIR,  "agent.log")
+LOG_FILE   = os.path.join(LOG_DIR, "agent.log")
 STATE_FILE = os.path.join(STATE_DIR, "plc_state.json")
 
-# ─── Logger ───────────────────────────────────────────────────────────────────
+# ── Logging ─────────────────────────────────────────────────────────────────
 
-log = setup_logger("agent", LOG_FILE)
+os.makedirs(LOG_DIR, exist_ok=True)
+os.makedirs(STATE_DIR, exist_ok=True)
 
-# ─── Simulated PLC state ──────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+    handlers=[
+        logging.FileHandler(LOG_FILE),
+        logging.StreamHandler(sys.stdout),
+    ],
+)
+log = logging.getLogger("agent")
 
-def update_plc_state(electrolyzer_enable: bool, source: str, schedule_id: str) -> None:
-    """Write the current simulated PLC state to disk."""
-    os.makedirs(STATE_DIR, exist_ok=True)
+
+# ── PLC state simulation ─────────────────────────────────────────────────────
+
+def update_plc_state(electrolyzer_enable: bool, source: str) -> None:
     state = {
-        "timestamp": utc_now(),
+        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
         "plc_state": "RUNNING" if electrolyzer_enable else "IDLE",
         "electrolyzer_enable": electrolyzer_enable,
         "last_source": source,
-        "last_schedule_id": schedule_id,
     }
     with open(STATE_FILE, "w") as f:
         json.dump(state, f, indent=2)
-    log.info(
-        "PLC state updated → %s (electrolyzer_enable=%s, source=%s, schedule_id=%s)",
-        state["plc_state"],
-        electrolyzer_enable,
-        source,
-        schedule_id,
-    )
+    log.info("PLC state -> %s (source=%s)", state["plc_state"], source)
 
-# ─── Message handler ─────────────────────────────────────────────────────────
 
-async def handle_message(websocket) -> None:
-    """
-    Handle a single incoming WSS connection.
-    Reads messages until the connection closes.
-    """
-    # Extract the remote IP for logging.
+# ── Message handler ───────────────────────────────────────────────────────────
+
+async def handle(websocket) -> None:
     try:
         sender_ip = websocket.remote_address[0]
     except Exception:
         sender_ip = "unknown"
 
-    log.info("New connection from %s", sender_ip)
+    log.info("Connection from %s", sender_ip)
 
-    async for raw_message in websocket:
-        # ── Parse JSON ──────────────────────────────────────────────────────
+    async for raw in websocket:
+        # Parse
         try:
-            data = json.loads(raw_message)
-        except json.JSONDecodeError as exc:
-            log.warning("REJECTED [%s] – invalid JSON: %s", sender_ip, exc)
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            log.warning("REJECTED [%s] invalid JSON", sender_ip)
             await websocket.send(json.dumps({"status": "error", "reason": "invalid JSON"}))
             continue
 
-        source      = data.get("source", "unknown")
-        schedule_id = data.get("schedule_id", "unknown")
+        source  = data.get("source", "unknown")
+        enabled = data.get("electrolyzer_enable")
 
-        log.info(
-            "Received message from %s | source=%s | schedule_id=%s | electrolyzer_enable=%s",
-            sender_ip, source, schedule_id, data.get("electrolyzer_enable"),
-        )
-
-        # ── Light schema validation ──────────────────────────────────────────
-        valid, reason = validate_message(data)
-        if not valid:
-            log.warning(
-                "REJECTED [%s] source=%s – schema error: %s",
-                sender_ip, source, reason,
-            )
-            await websocket.send(json.dumps({"status": "error", "reason": reason}))
+        # Schema check
+        if not isinstance(enabled, bool):
+            log.warning("REJECTED [%s] source=%s missing/invalid electrolyzer_enable", sender_ip, source)
+            await websocket.send(json.dumps({"status": "error", "reason": "electrolyzer_enable must be bool"}))
             continue
 
-        # ── Auth check ───────────────────────────────────────────────────────
+        # Auth check
         if AUTH_MODE == "token":
-            provided_token = data.get("token", "")
-            if provided_token != SCHEDULE_TOKEN:
+            provided = data.get("token", "")
+            if provided != SCHEDULE_TOKEN:
                 log.warning(
-                    "REJECTED [%s] source=%s schedule_id=%s – "
-                    "AUTH_MODE=token: missing or invalid token",
-                    sender_ip, source, schedule_id,
+                    "REJECTED [%s] source=%s -- AUTH_MODE=token: invalid/missing token",
+                    sender_ip, source,
                 )
-                await websocket.send(
-                    json.dumps({"status": "rejected", "reason": "invalid or missing token"})
-                )
+                await websocket.send(json.dumps({"status": "rejected", "reason": "invalid or missing token"}))
                 continue
-            log.info("Token validated OK for source=%s", source)
+            log.info("Token OK for source=%s", source)
         else:
-            # AUTH_MODE=none – the vulnerability: we accept everyone.
+            # AUTH_MODE=none: THIS IS THE VULNERABILITY BEING DEMONSTRATED
             log.warning(
-                "AUTH_MODE=none – accepting message from %s (source=%s) "
-                "WITHOUT any authentication. This is the vulnerability!",
+                "AUTH_MODE=none: accepting from %s (source=%s) with NO authentication",
                 sender_ip, source,
             )
 
-        # ── Accept the message ───────────────────────────────────────────────
-        electrolyzer_enable = data["electrolyzer_enable"]
-        log.info(
-            "ACCEPTED [%s] source=%s schedule_id=%s electrolyzer_enable=%s",
-            sender_ip, source, schedule_id, electrolyzer_enable,
-        )
-        update_plc_state(electrolyzer_enable, source, schedule_id)
-        await websocket.send(json.dumps({"status": "accepted", "schedule_id": schedule_id}))
+        # Accept
+        log.info("ACCEPTED [%s] source=%s electrolyzer_enable=%s", sender_ip, source, enabled)
+        update_plc_state(enabled, source)
+        await websocket.send(json.dumps({"status": "accepted"}))
 
-    log.info("Connection closed from %s", sender_ip)
+    log.info("Disconnected: %s", sender_ip)
 
-# ─── Main ─────────────────────────────────────────────────────────────────────
+
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 async def main() -> None:
-    # Build TLS context – server presents its certificate to clients.
     ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ssl_ctx.load_cert_chain(certfile=CERT_PATH, keyfile=KEY_PATH)
 
-    log.info("=" * 60)
+    log.info("=" * 55)
     log.info("Software Agent starting")
     log.info("  AUTH_MODE : %s", AUTH_MODE)
-    log.info("  WSS port  : %d", WSS_PORT)
-    log.info("  CERT_PATH : %s", CERT_PATH)
-    log.info("  STATE_FILE: %s", STATE_FILE)
+    log.info("  Port      : %d", WSS_PORT)
     if AUTH_MODE == "none":
-        log.warning("  *** AUTH_MODE=none – NO client authentication! ***")
-        log.warning("  *** Any client that can reach this port can send commands. ***")
-    log.info("=" * 60)
+        log.warning("  *** NO client authentication - vulnerability active ***")
+    log.info("=" * 55)
 
-    async with websockets.serve(handle_message, "0.0.0.0", WSS_PORT, ssl=ssl_ctx):
-        log.info("WSS server listening on wss://0.0.0.0:%d", WSS_PORT)
-        await asyncio.Future()  # run forever
+    async with websockets.serve(handle, "0.0.0.0", WSS_PORT, ssl=ssl_ctx):
+        log.info("Listening on wss://0.0.0.0:%d", WSS_PORT)
+        await asyncio.Future()
 
 
 if __name__ == "__main__":

