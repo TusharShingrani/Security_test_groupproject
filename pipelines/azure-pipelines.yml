@@ -5,6 +5,22 @@
 # Terraform authenticates to Azure via Service Principal environment variables
 # set as pipeline secret variables (ARM_CLIENT_ID, etc.).
 #
+# AGENT POOL NOTE:
+#   This pipeline uses a self-hosted agent (pool: Default) to avoid the
+#   "No hosted parallelism" error on free Azure DevOps organisations.
+#   Microsoft-hosted agents require a paid or granted parallelism slot.
+#
+#   To register a free self-hosted agent on any Linux machine (including WSL):
+#     1. Azure DevOps → Project settings → Agent pools → Default → New agent
+#     2. Follow the download + configure steps (takes ~5 minutes)
+#     3. Run: ./run.sh   (or install as a service with ./svc.sh install)
+#   The agent machine needs: bash, curl/wget, git, unzip. Terraform is
+#   installed by this pipeline script so it does NOT need to be pre-installed.
+#
+#   Alternatively, request a free Microsoft-hosted parallelism grant:
+#     https://aka.ms/azpipelines-parallelism-request  (1–2 business days)
+#   Then change `name: Default` below back to `vmImage: ubuntu-latest`.
+#
 # Required pipeline variables (Pipelines → Edit → Variables):
 #
 #   ARM_CLIENT_ID       – Service Principal app ID          [secret]
@@ -30,8 +46,10 @@ trigger:
 
 pr: none
 
+# Self-hosted agent – no parallelism cost on free Azure DevOps orgs.
+# See the AGENT POOL NOTE above for setup instructions.
 pool:
-  vmImage: ubuntu-latest
+  name: Default
 
 variables:
   TF_DIR:     $(System.DefaultWorkingDirectory)/infra
@@ -53,7 +71,14 @@ stages:
 
           - script: |
               set -euo pipefail
-              wget -q -O- https://apt.releases.hashicorp.com/gpg \
+              # Skip install if the correct version is already on the agent
+              if terraform version 2>/dev/null | grep -q "$(TF_VERSION)"; then
+                echo "Terraform $(TF_VERSION) already installed – skipping."
+                terraform version
+                exit 0
+              fi
+              # Install from HashiCorp APT (works on Ubuntu/Debian self-hosted agents)
+              curl -fsSL https://apt.releases.hashicorp.com/gpg \
                 | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
               echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] \
                 https://apt.releases.hashicorp.com $(lsb_release -cs) main" \
@@ -104,7 +129,14 @@ stages:
 
           - script: |
               set -euo pipefail
-              wget -q -O- https://apt.releases.hashicorp.com/gpg \
+              # Skip install if the correct version is already on the agent
+              if terraform version 2>/dev/null | grep -q "$(TF_VERSION)"; then
+                echo "Terraform $(TF_VERSION) already installed – skipping."
+                terraform version
+                exit 0
+              fi
+              # Install from HashiCorp APT (works on Ubuntu/Debian self-hosted agents)
+              curl -fsSL https://apt.releases.hashicorp.com/gpg \
                 | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
               echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] \
                 https://apt.releases.hashicorp.com $(lsb_release -cs) main" \
