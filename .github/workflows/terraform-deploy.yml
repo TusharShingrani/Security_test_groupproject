@@ -1,32 +1,17 @@
 # ───────────────────────────────────────────────────────────────────────
-# GitHub Actions - Terraform Deploy (Azure OIDC)
+# GitHub Actions - Terraform Deploy / Destroy (Azure OIDC)
 #
-# Authenticates to Azure using OIDC (no client secret stored in GitHub).
+# Trigger manually from the Actions tab.
+# Use the ACTION input to choose:
+#   apply   - deploy the 3-VM lab
+#   destroy - tear down everything in rg-wss-poc
 #
-# Required GitHub Secrets (Settings → Secrets → Actions):
-#   AZURE_CLIENT_ID       - Service Principal / App Registration client ID
-#   AZURE_TENANT_ID       - Azure AD tenant ID
-#   AZURE_SUBSCRIPTION_ID - Azure subscription ID
+# Required GitHub Secrets:
+#   AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID, SCHEDULE_TOKEN
 #
-# Required GitHub Variables (Settings → Variables → Actions):
-#   TF_STATE_RG         - Resource group of the tfstate storage account
-#   TF_STATE_SA         - Storage account name
-#   TF_STATE_CONTAINER  - Blob container name
-#   TF_STATE_KEY        - Blob key (e.g. wss-poc.tfstate)
-#   ADMIN_CIDR          - CIDR for SSH access (e.g. 1.2.3.4/32)
-#   AUTH_MODE           - "none" or "token"  (default: none)
-#
-# Optional secret:
-#   SCHEDULE_TOKEN      - Required only when AUTH_MODE=token
-#
-# Azure OIDC setup (one-time):
-#   1. Create an App Registration in Azure AD
-#   2. Grant it Contributor on your subscription
-#   3. Add a Federated Credential:
-#      - Issuer:  https://token.actions.githubusercontent.com
-#      - Subject: repo:<org>/<repo>:ref:refs/heads/feature/poc-wss-unauthorized-client-demo
-#      - Audience: api://AzureADTokenExchange
-#   4. Add the three secrets above to this GitHub repo
+# Required GitHub Variables:
+#   TF_STATE_RG, TF_STATE_SA, TF_STATE_CONTAINER, TF_STATE_KEY
+#   ADMIN_CIDR, LOCATION, AUTH_MODE
 # ───────────────────────────────────────────────────────────────────────
 
 name: Terraform Deploy
@@ -40,10 +25,19 @@ on:
       - 'app/**'
       - 'systemd/**'
       - '.github/workflows/terraform-deploy.yml'
-  workflow_dispatch:  # allow manual trigger from the Actions tab
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        default: 'apply'
+        type: choice
+        options:
+          - apply
+          - destroy
 
 permissions:
-  id-token: write   # required for OIDC token request
+  id-token: write
   contents: read
 
 env:
@@ -52,15 +46,13 @@ env:
 
 jobs:
   terraform:
-    name: Terraform Plan & Apply
+    name: Terraform ${{ github.event.inputs.action || 'apply' }}
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 2. Login to Azure via OIDC (no secrets stored - token exchanged at runtime)
       - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:
@@ -68,13 +60,11 @@ jobs:
           tenant-id:       ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # 3. Install Terraform
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
-      # 4. Terraform Init (backend config from GitHub Variables)
       - name: Terraform Init
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
@@ -89,8 +79,12 @@ jobs:
           ARM_TENANT_ID:       ${{ secrets.AZURE_TENANT_ID }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # 5. Terraform Validate
+      # ─────────────────────────────────────────────────────────────
+      # APPLY path
+      # ─────────────────────────────────────────────────────────────
+
       - name: Terraform Validate
+        if: ${{ (github.event.inputs.action || 'apply') == 'apply' }}
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform validate
         env:
@@ -99,11 +93,12 @@ jobs:
           ARM_TENANT_ID:       ${{ secrets.AZURE_TENANT_ID }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # 6. Terraform Plan
       - name: Terraform Plan
+        if: ${{ (github.event.inputs.action || 'apply') == 'apply' }}
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
           terraform plan \
+            -var="location=${{ vars.LOCATION }}" \
             -var="admin_cidr=${{ vars.ADMIN_CIDR }}" \
             -var="auth_mode=${{ vars.AUTH_MODE || 'none' }}" \
             -var="schedule_token=${{ secrets.SCHEDULE_TOKEN || 'changeme-token' }}" \
@@ -115,8 +110,8 @@ jobs:
           ARM_TENANT_ID:       ${{ secrets.AZURE_TENANT_ID }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # 7. Terraform Apply
       - name: Terraform Apply
+        if: ${{ (github.event.inputs.action || 'apply') == 'apply' }}
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform apply -auto-approve tfplan
         env:
@@ -125,10 +120,30 @@ jobs:
           ARM_TENANT_ID:       ${{ secrets.AZURE_TENANT_ID }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # 8. Show outputs (Digital Twin public IP, SSH command, etc.)
       - name: Terraform Outputs
+        if: ${{ (github.event.inputs.action || 'apply') == 'apply' }}
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform output -no-color
+        env:
+          ARM_USE_OIDC:        "true"
+          ARM_CLIENT_ID:       ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID:       ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # ─────────────────────────────────────────────────────────────
+      # DESTROY path
+      # ─────────────────────────────────────────────────────────────
+
+      - name: Terraform Destroy
+        if: ${{ github.event.inputs.action == 'destroy' }}
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          terraform destroy \
+            -auto-approve \
+            -var="location=${{ vars.LOCATION }}" \
+            -var="admin_cidr=${{ vars.ADMIN_CIDR }}" \
+            -var="auth_mode=${{ vars.AUTH_MODE || 'none' }}" \
+            -var="schedule_token=${{ secrets.SCHEDULE_TOKEN || 'changeme-token' }}"
         env:
           ARM_USE_OIDC:        "true"
           ARM_CLIENT_ID:       ${{ secrets.AZURE_CLIENT_ID }}
