@@ -1,4 +1,4 @@
-# ── Azure ─────────────────────────────────────────────────────────────────────
+# ── Azure ───────────────────────────────────────────────────────────────────
 
 variable "subscription_id" {
   description = "Azure subscription ID."
@@ -7,9 +7,9 @@ variable "subscription_id" {
 }
 
 variable "location" {
-  description = "Azure region."
+  description = "Azure region. westeurope = Amsterdam."
   type        = string
-  default     = "eastus"
+  default     = "westeurope"
 }
 
 variable "resource_group_name" {
