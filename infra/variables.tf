@@ -39,8 +39,10 @@ variable "admin_cidr" {
 # ── Compute ───────────────────────────────────────────────────────────────────
 
 variable "vm_size" {
+  # Standard_B1s has no capacity in germanywestcentral on student subscriptions.
+  # Standard_B2s (2 vCPU, 4GB) is the next cheapest and widely available.
   type    = string
-  default = "Standard_B1s"
+  default = "Standard_B2s"
 }
 
 variable "admin_username" {

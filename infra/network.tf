@@ -14,13 +14,14 @@ resource "azurerm_subnet" "poc" {
 
 # ── Public IPs ────────────────────────────────────────────────────────────────
 # Only the Digital Twin gets a public IP by default.
+# Standard SKU required - Basic SKU is restricted on student subscriptions.
 
 resource "azurerm_public_ip" "twin" {
   name                = "pip-twin"
   location            = azurerm_resource_group.poc.location
   resource_group_name = azurerm_resource_group.poc.name
   allocation_method   = "Static"
-  sku                 = "Basic"
+  sku                 = "Standard"
 }
 
 resource "azurerm_public_ip" "agent" {
@@ -29,7 +30,7 @@ resource "azurerm_public_ip" "agent" {
   location            = azurerm_resource_group.poc.location
   resource_group_name = azurerm_resource_group.poc.name
   allocation_method   = "Static"
-  sku                 = "Basic"
+  sku                 = "Standard"
 }
 
 resource "azurerm_public_ip" "attacker" {
@@ -38,7 +39,7 @@ resource "azurerm_public_ip" "attacker" {
   location            = azurerm_resource_group.poc.location
   resource_group_name = azurerm_resource_group.poc.name
   allocation_method   = "Static"
-  sku                 = "Basic"
+  sku                 = "Standard"
 }
 
 # ── NICs ─────────────────────────────────────────────────────────────────────
