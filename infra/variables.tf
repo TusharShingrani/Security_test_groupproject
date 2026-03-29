@@ -7,9 +7,9 @@ variable "subscription_id" {
 }
 
 variable "location" {
-  description = "Azure region. westeurope = Amsterdam."
+  description = "Azure region. germanywestcentral = Frankfurt (closest allowed region)."
   type        = string
-  default     = "westeurope"
+  default     = "germanywestcentral"
 }
 
 variable "resource_group_name" {
