@@ -7,9 +7,9 @@ variable "subscription_id" {
 }
 
 variable "location" {
-  description = "Azure region. germanywestcentral = Frankfurt (closest allowed region)."
+  description = "Azure region."
   type        = string
-  default     = "germanywestcentral"
+  default     = "norwayeast"
 }
 
 variable "resource_group_name" {
@@ -39,10 +39,9 @@ variable "admin_cidr" {
 # ── Compute ───────────────────────────────────────────────────────────────────
 
 variable "vm_size" {
-  # Standard_B1s has no capacity in germanywestcentral on student subscriptions.
-  # Standard_B2s (2 vCPU, 4GB) is the next cheapest and widely available.
+  # Standard_B2ats_v2 - free services eligible, available in norwayeast
   type    = string
-  default = "Standard_B2s"
+  default = "Standard_B2ats_v2"
 }
 
 variable "admin_username" {
