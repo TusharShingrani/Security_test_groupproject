@@ -44,16 +44,16 @@ twin_ssh() {
   ssh -q -i "$SSH_KEY" -o StrictHostKeyChecking=no azureuser@"$TWIN_IP" "$@"
 }
 
-# Jump through twin to reach private VMs
+# Jump through twin to reach private VMs (ProxyCommand with explicit key for the hop)
 agent_ssh() {
   ssh -q -i "$SSH_KEY" -o StrictHostKeyChecking=no \
-    -o ProxyJump="azureuser@$TWIN_IP" \
+    -o "ProxyCommand=ssh -q -i $SSH_KEY -o StrictHostKeyChecking=no -W %h:%p azureuser@$TWIN_IP" \
     azureuser@10.0.1.20 "$@"
 }
 
 attacker_ssh() {
   ssh -q -i "$SSH_KEY" -o StrictHostKeyChecking=no \
-    -o ProxyJump="azureuser@$TWIN_IP" \
+    -o "ProxyCommand=ssh -q -i $SSH_KEY -o StrictHostKeyChecking=no -W %h:%p azureuser@$TWIN_IP" \
     azureuser@10.0.1.30 "$@"
 }
 
