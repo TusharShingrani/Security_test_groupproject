@@ -33,7 +33,6 @@ write_files:
 
   - path: /home/${admin_username}/.ssh/poc_rsa
     encoding: b64
-    owner: ${admin_username}:${admin_username}
     permissions: "0600"
     content: ${base64encode(ssh_private_key)}
 
@@ -44,6 +43,9 @@ write_files:
 
 runcmd:
   - mkdir -p /var/log/p2p-demo
+  - mkdir -p /home/${admin_username}/.ssh
+  - chown ${admin_username}:${admin_username} /home/${admin_username}/.ssh /home/${admin_username}/.ssh/poc_rsa
+  - chmod 700 /home/${admin_username}/.ssh
   - python3 -m venv /opt/p2p-demo/venv
   - /opt/p2p-demo/venv/bin/pip install --quiet -r /opt/p2p-demo/requirements.txt
   - systemctl daemon-reload
