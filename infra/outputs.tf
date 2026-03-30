@@ -25,3 +25,9 @@ output "ssh_connect" {
 output "auth_mode" {
   value = var.auth_mode
 }
+
+output "server_cert_pem" {
+  description = "TLS certificate for the agent WSS server (copy to VMs if cloud-init failed)."
+  value       = tls_self_signed_cert.agent_server.cert_pem
+  sensitive   = true
+}
