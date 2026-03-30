@@ -7,19 +7,19 @@ packages:
 
 write_files:
   - path: /opt/p2p-demo/requirements.txt
+    encoding: b64
     permissions: "0644"
-    content: |
-      ${indent(6, requirements_txt)}
+    content: ${base64encode(requirements_txt)}
 
   - path: /opt/p2p-demo/attacker.py
+    encoding: b64
     permissions: "0755"
-    content: |
-      ${indent(6, attacker_py)}
+    content: ${base64encode(attacker_py)}
 
   - path: /opt/p2p-demo/certs/server.crt
+    encoding: b64
     permissions: "0644"
-    content: |
-      ${indent(6, server_cert_pem)}
+    content: ${base64encode(server_cert_pem)}
 
   - path: /opt/p2p-demo/attacker.env
     permissions: "0600"
@@ -30,13 +30,13 @@ write_files:
       LOG_DIR=/var/log/p2p-demo
 
   - path: /etc/systemd/system/attacker.service
+    encoding: b64
     permissions: "0644"
-    content: |
-      ${indent(6, attacker_service)}
+    content: ${base64encode(attacker_service)}
 
 runcmd:
   - mkdir -p /var/log/p2p-demo
   - python3 -m venv /opt/p2p-demo/venv
   - /opt/p2p-demo/venv/bin/pip install --quiet -r /opt/p2p-demo/requirements.txt
   - systemctl daemon-reload
-  # Attacker service is installed but NOT started - run manually for the demo
+  # Attacker service installed but NOT started - run manually for the demo

@@ -7,24 +7,24 @@ packages:
 
 write_files:
   - path: /opt/p2p-demo/requirements.txt
+    encoding: b64
     permissions: "0644"
-    content: |
-      ${indent(6, requirements_txt)}
+    content: ${base64encode(requirements_txt)}
 
   - path: /opt/p2p-demo/agent.py
+    encoding: b64
     permissions: "0755"
-    content: |
-      ${indent(6, agent_py)}
+    content: ${base64encode(agent_py)}
 
   - path: /opt/p2p-demo/certs/server.crt
+    encoding: b64
     permissions: "0644"
-    content: |
-      ${indent(6, server_cert_pem)}
+    content: ${base64encode(server_cert_pem)}
 
   - path: /opt/p2p-demo/certs/server.key
+    encoding: b64
     permissions: "0600"
-    content: |
-      ${indent(6, server_key_pem)}
+    content: ${base64encode(server_key_pem)}
 
   - path: /opt/p2p-demo/agent.env
     permissions: "0600"
@@ -38,9 +38,9 @@ write_files:
       LOG_DIR=/var/log/p2p-demo
 
   - path: /etc/systemd/system/agent.service
+    encoding: b64
     permissions: "0644"
-    content: |
-      ${indent(6, agent_service)}
+    content: ${base64encode(agent_service)}
 
 runcmd:
   - mkdir -p /var/lib/p2p-demo /var/log/p2p-demo

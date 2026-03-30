@@ -7,19 +7,19 @@ packages:
 
 write_files:
   - path: /opt/p2p-demo/requirements.txt
+    encoding: b64
     permissions: "0644"
-    content: |
-      ${indent(6, requirements_txt)}
+    content: ${base64encode(requirements_txt)}
 
   - path: /opt/p2p-demo/twin.py
+    encoding: b64
     permissions: "0755"
-    content: |
-      ${indent(6, twin_py)}
+    content: ${base64encode(twin_py)}
 
   - path: /opt/p2p-demo/certs/server.crt
+    encoding: b64
     permissions: "0644"
-    content: |
-      ${indent(6, server_cert_pem)}
+    content: ${base64encode(server_cert_pem)}
 
   - path: /opt/p2p-demo/twin.env
     permissions: "0600"
@@ -32,15 +32,15 @@ write_files:
       LOG_DIR=/var/log/p2p-demo
 
   - path: /home/${admin_username}/.ssh/poc_rsa
+    encoding: b64
     owner: ${admin_username}:${admin_username}
     permissions: "0600"
-    content: |
-      ${indent(6, ssh_private_key)}
+    content: ${base64encode(ssh_private_key)}
 
   - path: /etc/systemd/system/twin.service
+    encoding: b64
     permissions: "0644"
-    content: |
-      ${indent(6, twin_service)}
+    content: ${base64encode(twin_service)}
 
 runcmd:
   - mkdir -p /var/log/p2p-demo
