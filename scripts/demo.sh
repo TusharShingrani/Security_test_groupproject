@@ -4,6 +4,8 @@
 #
 # Commands:
 #   status          - Check all VM services
+#   connectivity    - Test network reachability between all 3 VMs
+#   ssh-key         - Print the SSH key and connection instructions for teammates
 #   logs-agent      - Tail agent log (shows all incoming commands)
 #   logs-twin       - Tail twin log
 #   attack-once     - Run attacker a single time (Phase A)
@@ -185,20 +187,69 @@ ENDSSH
   echo "twin-vm fixed."
 }
 
+cmd_connectivity() {
+  get_twin_ip; ensure_key
+  echo "=== Connectivity check across all 3 VMs ==="
+  echo ""
+
+  echo "--- twin-vm → agent-vm (10.0.1.20) ---"
+  twin_ssh "ping -c 3 10.0.1.20 && echo 'ping OK' || echo 'ping FAILED'"
+  echo ""
+  twin_ssh "nc -zv 10.0.1.20 8443 2>&1 && echo 'WSS port 8443 OPEN' || echo 'port 8443 UNREACHABLE'"
+  echo ""
+
+  echo "--- twin-vm → attacker-vm (10.0.1.30) ---"
+  twin_ssh "ping -c 3 10.0.1.30 && echo 'ping OK' || echo 'ping FAILED'"
+  echo ""
+
+  echo "--- attacker-vm → agent-vm (10.0.1.20) ---"
+  attacker_ssh "ping -c 3 10.0.1.20 && echo 'ping OK' || echo 'ping FAILED'"
+  echo ""
+  attacker_ssh "nc -zv 10.0.1.20 8443 2>&1 && echo 'WSS port 8443 OPEN (attacker can reach agent)' || echo 'port 8443 UNREACHABLE'"
+  echo ""
+
+  echo "--- agent-vm active WSS connections ---"
+  agent_ssh "sudo ss -tnp | grep 8443 || echo 'no active connections right now'"
+}
+
+cmd_ssh_key() {
+  ensure_key
+  echo "======================================================"
+  echo " SSH KEY — share with teammates for lab access"
+  echo "======================================================"
+  echo ""
+  echo "Only twin-vm has a public IP: $( cd "$INFRA_DIR" && terraform output -raw twin_public_ip 2>/dev/null || echo "4.235.104.66 (check terraform output)" )"
+  echo "Agent-vm and attacker-vm are private — hop through twin."
+  echo ""
+  echo "--- Steps for your teammate ---"
+  echo "1. Save the key below to ~/poc_rsa on their machine and run: chmod 600 ~/poc_rsa"
+  echo "2. SSH to twin-vm:"
+  echo "     ssh -i ~/poc_rsa azureuser@TWIN_IP"
+  echo "3. SSH to agent-vm (via twin):"
+  echo "     ssh -i ~/poc_rsa -o 'ProxyCommand=ssh -i ~/poc_rsa -W %h:%p azureuser@TWIN_IP' azureuser@10.0.1.20"
+  echo "4. SSH to attacker-vm (via twin):"
+  echo "     ssh -i ~/poc_rsa -o 'ProxyCommand=ssh -i ~/poc_rsa -W %h:%p azureuser@TWIN_IP' azureuser@10.0.1.30"
+  echo ""
+  echo "--- Private key (copy everything between the dashes) ---"
+  cat "$SSH_KEY"
+}
+
 cmd_help() {
-  head -15 "$0" | grep '#' | sed 's/^# //'
+  head -16 "$0" | grep '#' | sed 's/^# //'
 }
 
 # ── dispatch ────────────────────────────────────────────────────────────────
 
 case "${1:-help}" in
-  status)       cmd_status ;;
-  logs-agent)   cmd_logs_agent ;;
-  logs-twin)    cmd_logs_twin ;;
-  attack-once)  cmd_attack_once ;;
-  attack-loop)  cmd_attack_loop ;;
-  phase-b-on)   cmd_phase_b_on ;;
-  phase-a-on)   cmd_phase_a_on ;;
-  fix-twin)     cmd_fix_twin ;;
-  help|*)       cmd_help ;;
+  status)          cmd_status ;;
+  connectivity)    cmd_connectivity ;;
+  ssh-key)         cmd_ssh_key ;;
+  logs-agent)      cmd_logs_agent ;;
+  logs-twin)       cmd_logs_twin ;;
+  attack-once)     cmd_attack_once ;;
+  attack-loop)     cmd_attack_loop ;;
+  phase-b-on)      cmd_phase_b_on ;;
+  phase-a-on)      cmd_phase_a_on ;;
+  fix-twin)        cmd_fix_twin ;;
+  help|*)          cmd_help ;;
 esac
