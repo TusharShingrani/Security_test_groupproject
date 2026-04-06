@@ -1,4 +1,142 @@
-# WSS Unauthorized Client – Security PoC
+# Secure Cloud Platform — Gitea on Azure
+
+## Project Purpose
+
+This project demonstrates a security-first deployment of Gitea (a self-hosted Git service) on Azure Container Apps, with Zero Trust access controls, DevSecOps automation, and comprehensive monitoring.
+
+**Research question:** How effective are Zero Trust controls and DevSecOps security automation in reducing risks in a cloud-hosted platform?
+
+---
+
+## Architecture
+
+```
+Internet → Azure Container Apps (HTTPS) → Gitea Container
+                                               │
+                              ┌────────────────┤
+                              │                │
+                        Key Vault         Azure Files
+                     (secrets via      (persistent repos
+                    managed identity)    + SQLite DB)
+
+GitHub Actions:
+  Gitleaks → Checkov → Trivy → terraform validate → Deploy
+```
+
+See [docs/architecture/overview.md](docs/architecture/overview.md) for full diagram.
+
+---
+
+## Security Controls
+
+| Control | Tool | What it blocks |
+|---|---|---|
+| Zero Trust identity | Entra ID OIDC | Unauthorized access, password spray |
+| Secrets management | Azure Key Vault + Managed Identity | Credential leakage |
+| Container hardening | Rootless image (UID 1000) | Container escape |
+| Secret scanning | Gitleaks | Secrets committed to repo |
+| IaC scanning | Checkov | Insecure Terraform configs |
+| Image scanning | Trivy | Vulnerable container images |
+| Monitoring | Log Analytics + 4 alerts | Failed logins, restarts, anomalies |
+
+---
+
+## Deployment
+
+### Prerequisites
+
+- Azure subscription with Container Apps available in `norwayeast`
+- GitHub repository secrets:
+  - `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` (OIDC)
+  - `GITEA_ADMIN_PASSWORD`
+  - `GITEA_OIDC_CLIENT_SECRET` (after Entra ID app registration)
+- GitHub repository variables:
+  - `TF_STATE_RG`, `TF_STATE_SA`, `TF_STATE_CONTAINER`
+
+### Deploy via GitHub Actions
+
+1. Push to `feature/secure-cloud-platform-gitea`
+2. All security gates run automatically (Gitleaks, Checkov, Trivy)
+3. If all pass, Terraform deploys to Azure
+4. Get Gitea URL from workflow output
+
+### Deploy manually
+
+```bash
+cd terraform
+terraform init \
+  -backend-config="resource_group_name=rg-tfstate" \
+  -backend-config="storage_account_name=tfstatepoc2" \
+  -backend-config="container_name=tfstate" \
+  -backend-config="key=gitea-sec.tfstate"
+
+terraform apply -var="gitea_admin_password=<your-password>"
+```
+
+---
+
+## Post-Deployment Steps
+
+1. Navigate to the Gitea URL (`terraform output gitea_url`)
+2. Complete the web installer and create admin account
+3. Set up Entra ID OIDC (`terraform output entra_oidc_setup`)
+4. Disable local registration in Gitea admin panel
+5. Create users via Entra ID only
+
+---
+
+## Security Validation
+
+See [docs/misuse-cases/misuse-cases.md](docs/misuse-cases/misuse-cases.md) for 6 attack scenarios.
+Evidence captured in [docs/evidence/](docs/evidence/).
+
+---
+
+## Threat Model
+
+[docs/threat-model/threat-model.md](docs/threat-model/threat-model.md) — STRIDE analysis.
+
+---
+
+## Monitoring
+
+[docs/detections/kql-queries.md](docs/detections/kql-queries.md) — 8 KQL queries.
+
+4 alert rules deployed automatically:
+1. Container restarts
+2. Failed login attempts (brute force)
+3. Local auth attempts (OIDC bypass)
+4. Abnormal traffic (DoS / scanning)
+
+---
+
+## Cleanup
+
+```bash
+cd terraform
+terraform destroy -var="gitea_admin_password=any"
+```
+
+---
+
+## BoK Mapping
+
+| Topic | Implementation |
+|---|---|
+| Threat analysis | STRIDE model, trust boundaries |
+| Misuse cases | 6 documented attack scenarios |
+| Authentication | Entra ID OIDC, MFA, local login disabled |
+| Cryptography | TLS 1.2+ enforced, Key Vault RSA keys |
+| Key management | Key Vault + managed identity (no password) |
+| Application security | DISABLE_REGISTRATION, REQUIRE_SIGNIN_VIEW |
+| System security | Rootless container, no SSH exposed |
+| Logging/monitoring | Log Analytics, 4 alerts, 8 KQL queries |
+| DevSecOps | Gitleaks + Checkov + Trivy in CI/CD |
+| Laws/standards | Zero Trust (NIST SP 800-207), OWASP Top 10 |
+
+---
+
+<!-- Previous project (WSS PoC) is on branch feature/poc-wss-unauthorized-client-demo -->
 
 ## What this demonstrates
 
