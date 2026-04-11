@@ -45,8 +45,8 @@ resource "azurerm_container_app" "gitea" {
   }
 
   secret {
-    name                = "storage-key"
-    value               = azurerm_storage_account.main.primary_access_key
+    name  = "storage-key"
+    value = azurerm_storage_account.main.primary_access_key
   }
 
   ingress {

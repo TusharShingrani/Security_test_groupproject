@@ -33,3 +33,11 @@ CVE-2025-22868
 
 # golang.org/x/image — only triggered by malicious image files, low risk in Gitea context
 CVE-2024-24792
+
+# Alpine openssl (libcrypto3/libssl3) — DoS via NULL pointer dereference in CMS
+# Fix in Alpine 3.5.6-r0, pending upstream image rebuild by Gitea maintainers
+CVE-2026-28390
+
+# google.golang.org/grpc — authorization bypass in HTTP/2 path validation
+# Fixed in grpc-go 1.79.3, requires Gitea to update their gRPC dependency
+CVE-2026-33186
