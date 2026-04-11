@@ -80,12 +80,12 @@ resource "azurerm_container_app" "gitea" {
       # Rootless image runs as UID 1000, data at /var/lib/gitea
       env {
         name  = "GITEA__server__DOMAIN"
-        value = azurerm_container_app.gitea.ingress[0].fqdn
+        value = "ca-gitea.${azurerm_container_app_environment.main.default_domain}"
       }
 
       env {
         name  = "GITEA__server__ROOT_URL"
-        value = "https://${azurerm_container_app.gitea.ingress[0].fqdn}"
+        value = "https://ca-gitea.${azurerm_container_app_environment.main.default_domain}"
       }
 
       env {
