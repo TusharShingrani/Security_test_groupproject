@@ -79,7 +79,7 @@ variable "min_replicas" {
 }
 
 variable "max_replicas" {
-  description = "Maximum container replicas"
+  description = "Maximum container replicas (must be 1 for SQLite — no concurrent writers)"
   type        = number
-  default     = 2
+  default     = 1
 }
