@@ -38,17 +38,20 @@ resource "azurerm_key_vault" "main" {
 resource "azurerm_key_vault_secret" "gitea_admin_password" {
   name         = "gitea-admin-password"
   value        = var.gitea_admin_password
+  content_type = "text/plain"
   key_vault_id = azurerm_key_vault.main.id
 }
 
 resource "azurerm_key_vault_secret" "gitea_secret_key" {
   name         = "gitea-secret-key"
   value        = var.gitea_secret_key != "" ? var.gitea_secret_key : random_string.suffix.result
+  content_type = "text/plain"
   key_vault_id = azurerm_key_vault.main.id
 }
 
 resource "azurerm_key_vault_secret" "gitea_oidc_client_secret" {
   name         = "gitea-oidc-client-secret"
   value        = var.gitea_oidc_client_secret != "" ? var.gitea_oidc_client_secret : "not-configured"
+  content_type = "text/plain"
   key_vault_id = azurerm_key_vault.main.id
 }
