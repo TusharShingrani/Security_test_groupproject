@@ -164,6 +164,5 @@ resource "azurerm_container_app" "gitea" {
 
   depends_on = [
     azurerm_container_app_environment_storage.gitea,
-    azurerm_role_assignment.kv_secrets_user,
   ]
 }
