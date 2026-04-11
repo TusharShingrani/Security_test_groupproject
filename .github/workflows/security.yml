@@ -89,7 +89,8 @@ jobs:
           # CKV2_AZURE_40: Shared key auth — required for Container Apps Azure Files mount.
           # CKV2_AZURE_1: Customer Managed Key — unnecessary complexity for PoC.
           # CKV2_AZURE_33: Storage private endpoint — requires VNet injection (costs extra).
-          skip_check: "CKV_AZURE_109,CKV_AZURE_189,CKV_AZURE_110,CKV2_AZURE_32,CKV_AZURE_41,CKV_AZURE_59,CKV_AZURE_33,CKV_AZURE_206,CKV2_AZURE_41,CKV2_AZURE_38,CKV2_AZURE_40,CKV2_AZURE_1,CKV2_AZURE_33"
+          # CKV_AZURE_42: KV recoverability requires purge_protection=true — disabled for PoC teardown convenience.
+          skip_check: "CKV_AZURE_109,CKV_AZURE_189,CKV_AZURE_110,CKV_AZURE_42,CKV2_AZURE_32,CKV_AZURE_41,CKV_AZURE_59,CKV_AZURE_33,CKV_AZURE_206,CKV2_AZURE_41,CKV2_AZURE_38,CKV2_AZURE_40,CKV2_AZURE_1,CKV2_AZURE_33"
 
       - name: Upload Checkov SARIF
         uses: github/codeql-action/upload-sarif@v3
