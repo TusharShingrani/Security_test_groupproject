@@ -142,9 +142,9 @@ jobs:
     name: Terraform — Deploy
     runs-on: ubuntu-latest
     needs: [gitleaks, terraform-checks, checkov, trivy]
-    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/feature/secure-cloud-platform-gitea'
-    # No 'environment:' key — keeps the OIDC subject as a branch ref:
-    # repo:TusharShingrani/Security_test_groupproject:ref:refs/heads/feature/secure-cloud-platform-gitea
+    # Only runs when manually triggered — requires Azure OIDC federated credentials
+    # to be configured for this repo in the Azure App Registration.
+    if: github.event_name == 'workflow_dispatch'
 
     env:
       ARM_USE_OIDC:        "true"
