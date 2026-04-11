@@ -15,6 +15,6 @@ locals {
     managed = "terraform"
   }
 
-  kv_name  = "kv-gitea-${random_string.suffix.result}"
-  sa_name  = "sagitea${random_string.suffix.result}"
+  kv_name = "kv-gitea-${random_string.suffix.result}"
+  sa_name = "sagitea${random_string.suffix.result}"
 }

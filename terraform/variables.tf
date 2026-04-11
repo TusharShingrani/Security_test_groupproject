@@ -57,7 +57,7 @@ variable "tenant_id" {
 variable "gitea_image" {
   description = "Gitea container image (rootless preferred)"
   type        = string
-  default     = "gitea/gitea:1.21-rootless"
+  default     = "gitea/gitea:latest-rootless"
 }
 
 variable "container_cpu" {

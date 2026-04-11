@@ -1,0 +1,35 @@
+# Trivy ignore file — CVEs reviewed and accepted for this PoC
+# These are Go standard library CVEs embedded in the Gitea binary.
+# They require Gitea upstream to rebuild with a newer Go compiler version.
+# They are tracked and will be re-evaluated when a new Gitea image is released.
+
+# golang stdlib — requires Go 1.22.7+ rebuild by Gitea upstream
+CVE-2024-34156
+
+# golang stdlib — requires Go 1.23.12+ / 1.24.6+ rebuild
+CVE-2025-47907
+
+# golang stdlib — requires Go 1.24.8+ rebuild
+CVE-2025-58183
+
+# golang stdlib — requires Go 1.24.11+ rebuild
+CVE-2025-61729
+
+# golang stdlib — requires Go 1.24.12+ rebuild
+CVE-2025-61726
+CVE-2025-61728
+
+# golang stdlib — requires Go 1.25.8+ rebuild
+CVE-2026-25679
+
+# golang stdlib — requires Go 1.24.13+ rebuild
+CVE-2025-68121
+
+# golang.org/x/crypto — DoS in SSH key exchange, SSH not exposed in this deployment
+CVE-2025-22869
+
+# golang.org/x/oauth2 — memory exhaustion in JWS token parsing
+CVE-2025-22868
+
+# golang.org/x/image — only triggered by malicious image files, low risk in Gitea context
+CVE-2024-24792

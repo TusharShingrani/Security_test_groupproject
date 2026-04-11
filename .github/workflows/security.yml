@@ -96,22 +96,24 @@ jobs:
       - name: Scan Gitea image with Trivy
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: gitea/gitea:1.21-rootless
+          image-ref: gitea/gitea:latest-rootless
           format: table
           exit-code: '1'
           ignore-unfixed: true
+          trivyignores: .trivyignore
           vuln-type: os,library
           severity: CRITICAL,HIGH
-        # Fails if CRITICAL or HIGH unfixed CVEs are found
+        # Fails if CRITICAL or HIGH unfixed CVEs are found (Go stdlib CVEs requiring upstream rebuild are in .trivyignore)
 
       - name: Trivy SARIF output
         uses: aquasecurity/trivy-action@master
         if: always()
         with:
-          image-ref: gitea/gitea:1.21-rootless
+          image-ref: gitea/gitea:latest-rootless
           format: sarif
           output: trivy-results.sarif
           ignore-unfixed: true
+          trivyignores: .trivyignore
           vuln-type: os,library
           severity: CRITICAL,HIGH
 

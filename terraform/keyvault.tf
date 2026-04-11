@@ -42,8 +42,8 @@ resource "azurerm_key_vault_secret" "gitea_admin_password" {
 }
 
 resource "azurerm_key_vault_secret" "gitea_secret_key" {
-  name  = "gitea-secret-key"
-  value = var.gitea_secret_key != "" ? var.gitea_secret_key : random_string.suffix.result
+  name         = "gitea-secret-key"
+  value        = var.gitea_secret_key != "" ? var.gitea_secret_key : random_string.suffix.result
   key_vault_id = azurerm_key_vault.main.id
 }
 
