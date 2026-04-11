@@ -64,10 +64,19 @@ resource "azurerm_container_app" "gitea" {
     min_replicas = var.min_replicas
     max_replicas = var.max_replicas
 
+    # Azure Files (SMB) share — persistent repos, avatars, attachments, logs
     volume {
       name         = "gitea-data"
       storage_type = "AzureFile"
       storage_name = azurerm_container_app_environment_storage.gitea.name
+    }
+
+    # Local ephemeral volume for SQLite DB — Azure Files SMB does not support
+    # the POSIX fcntl() advisory locks that SQLite requires, so the DB must
+    # live on local storage. Data is lost on container restart (PoC trade-off).
+    volume {
+      name         = "gitea-db"
+      storage_type = "EmptyDir"
     }
 
     container {
@@ -125,9 +134,10 @@ resource "azurerm_container_app" "gitea" {
         value = "sqlite3"
       }
 
+      # DB on local EmptyDir — POSIX locks work here (unlike Azure Files SMB)
       env {
         name  = "GITEA__database__PATH"
-        value = "/var/lib/gitea/data/gitea.db"
+        value = "/gitea-db/gitea.db"
       }
 
       env {
@@ -145,10 +155,16 @@ resource "azurerm_container_app" "gitea" {
         value = "/var/lib/gitea/log"
       }
 
-      # Volume mount for persistent storage
+      # Azure Files mount — repos, avatars, attachments, logs
       volume_mounts {
         name = "gitea-data"
         path = "/var/lib/gitea"
+      }
+
+      # EmptyDir mount — SQLite database only
+      volume_mounts {
+        name = "gitea-db"
+        path = "/gitea-db"
       }
 
       # Liveness probe
