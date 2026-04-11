@@ -93,6 +93,13 @@ resource "azurerm_container_app" "gitea" {
         value = "true"
       }
 
+      # Azure Files SMB does not support chmod; redirect git's home dir to
+      # local ephemeral storage so .gitconfig.lock chmod succeeds on startup
+      env {
+        name  = "GITEA__git__HOME_PATH"
+        value = "/tmp/gitea-home"
+      }
+
       env {
         name  = "GITEA__server__DISABLE_SSH"
         value = "true"
