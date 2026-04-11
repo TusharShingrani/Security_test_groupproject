@@ -89,6 +89,11 @@ resource "azurerm_container_app" "gitea" {
       }
 
       env {
+        name  = "GITEA__security__INSTALL_LOCK"
+        value = "true"
+      }
+
+      env {
         name  = "GITEA__server__DISABLE_SSH"
         value = "true"
       }
