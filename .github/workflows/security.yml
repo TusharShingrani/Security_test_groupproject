@@ -163,6 +163,11 @@ jobs:
         with:
           terraform_version: "1.8.5"
 
+      - name: Register required Azure resource providers
+        run: |
+          az provider register --namespace Microsoft.App --wait
+          az provider register --namespace Microsoft.OperationalInsights --wait
+
       - name: Terraform Init
         working-directory: terraform
         run: |

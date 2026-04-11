@@ -28,8 +28,10 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "container_restarts" {
   severity             = 2
 
   criteria {
+    # isfuzzy=true: silently returns empty if the table doesn't exist yet
+    # (fresh workspace before Container App has sent any logs)
     query = <<-KQL
-      ContainerAppSystemLogs_CL
+      union isfuzzy=true ContainerAppSystemLogs_CL
       | where RevisionName_s contains "ca-gitea"
       | where Log_s contains "OOMKilled" or Log_s contains "CrashLoopBackOff" or Log_s contains "Restarting"
       | summarize count() by bin(TimeGenerated, 5m)
@@ -60,7 +62,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "failed_logins" {
 
   criteria {
     query = <<-KQL
-      ContainerAppConsoleLogs_CL
+      union isfuzzy=true ContainerAppConsoleLogs_CL
       | where ContainerAppName_s == "ca-gitea"
       | where Log_s contains "Failed" and Log_s contains "login"
       | summarize FailedLogins = count() by bin(TimeGenerated, 5m)
@@ -92,7 +94,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "local_auth_attempt" {
 
   criteria {
     query = <<-KQL
-      ContainerAppConsoleLogs_CL
+      union isfuzzy=true ContainerAppConsoleLogs_CL
       | where ContainerAppName_s == "ca-gitea"
       | where Log_s contains "signin" and Log_s !contains "oauth2"
       | summarize count() by bin(TimeGenerated, 5m)
@@ -123,7 +125,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "abnormal_traffic" {
 
   criteria {
     query = <<-KQL
-      ContainerAppConsoleLogs_CL
+      union isfuzzy=true ContainerAppConsoleLogs_CL
       | where ContainerAppName_s == "ca-gitea"
       | summarize Requests = count() by bin(TimeGenerated, 1m)
       | where Requests > 500
