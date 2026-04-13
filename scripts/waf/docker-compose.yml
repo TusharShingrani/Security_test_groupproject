@@ -1,0 +1,58 @@
+version: "3.8"
+
+# Lightweight WAF (NGINX + ModSecurity + OWASP CRS) reverse-proxying to live Gitea
+#
+# Usage:
+#   cd scripts/waf
+#   GITEA_URL=https://ca-gitea.wittydune-da50dd5c.norwayeast.azurecontainerapps.io \
+#     docker compose up -d
+#
+# Then test via http://localhost:8080
+# ModSecurity blocks are visible in: docker compose logs -f waf
+
+services:
+  waf:
+    image: owasp/modsecurity-crs:nginx-alpine
+    container_name: gitea-waf
+    ports:
+      - "8080:8080"
+    environment:
+      # Upstream Gitea instance (can override via env var at runtime)
+      BACKEND: "${GITEA_URL:-https://ca-gitea.wittydune-da50dd5c.norwayeast.azurecontainerapps.io}"
+
+      # ModSecurity mode: DetectionOnly (log) or On (block)
+      MODSEC_RULE_ENGINE: "On"
+
+      # OWASP CRS anomaly scoring thresholds
+      # Lower = more sensitive (more false positives); 5 is CRS default
+      PARANOIA: "1"
+      ANOMALY_INBOUND: "5"
+      ANOMALY_OUTBOUND: "4"
+
+      # Pass the real client IP to the backend (if running behind another proxy)
+      REAL_IP_HEADER: "X-Forwarded-For"
+      REAL_IP_PROXY_HEADER: "X-Forwarded-For"
+      REAL_IP_TRUSTED_PROXY_HEADER: "X-Forwarded-For"
+
+      # Log to stdout for Docker visibility
+      NGINX_ERROR_LOG_LEVEL: "warn"
+      MODSEC_AUDIT_LOG_TYPE: "Serial"
+      MODSEC_AUDIT_LOG: "/dev/stdout"
+
+      # Allow larger request bodies (git push payloads)
+      MODSEC_REQ_BODY_LIMIT: "52428800"   # 50 MiB
+      NGINX_CLIENT_MAX_BODY_SIZE: "50m"
+
+    # ModSecurity writes audit logs to stdout; capture all
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
