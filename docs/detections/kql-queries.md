@@ -78,17 +78,25 @@ ContainerAppConsoleLogs_CL
 
 ---
 
-## 6. OIDC vs Local Login Comparison
+## 6. Local Password Auth Attempts
 
-Shows ratio of Entra ID logins vs local logins (local should be 0).
+Detects direct password-based logins. With `DISABLE_REGISTRATION=true` only
+the admin account can log in locally — any volume here warrants investigation.
+(When Entra ID OIDC is enabled this query can distinguish OIDC from local logins.)
 
 ```kql
 ContainerAppConsoleLogs_CL
 | where ContainerAppName_s == "ca-gitea"
-| where Log_s contains "signin" or Log_s contains "oauth2"
-| extend LoginType = iff(Log_s contains "oauth2", "Entra ID OIDC", "Local")
-| summarize Count = count() by LoginType, bin(TimeGenerated, 1h)
-| render columnchart
+| where Log_s contains "user signin" or Log_s contains "Logged in as"
+      or (Log_s contains "Failed" and Log_s contains "login")
+| extend AuthResult = case(
+    Log_s contains "Failed" or Log_s contains "Invalid", "FAILED",
+    Log_s contains "Logged in" or Log_s contains "signed in", "SUCCESS",
+    "UNKNOWN"
+  )
+| extend Username = extract(@'user[=:\s"]+([^\s",]+)', 1, Log_s)
+| project TimeGenerated, AuthResult, Username, Log_s
+| order by TimeGenerated desc
 ```
 
 ---
@@ -121,3 +129,58 @@ AlertsManagementResources
           Fired = properties.essentials.startDateTime
 | order by Fired desc
 ```
+
+---
+
+## How to Trigger Each Alert (for evidence capture)
+
+### alert-failed-logins (MC-02)
+
+Run `scripts/validation/brute-force-sim.py` — it sends ≥7 POST /user/login
+requests with an intentionally wrong password within a 1-minute window:
+
+```bash
+cd scripts/validation
+python3 brute-force-sim.py
+# Wait ~5 min, then check Azure Monitor → Alerts
+```
+
+Expected: alert fires with `Fired` state in Azure Monitor.
+Run KQL query **#1** to confirm log entries.
+
+### alert-container-restarts
+
+Trigger a container restart via:
+
+```bash
+az containerapp revision restart \
+  --name ca-gitea \
+  --resource-group rg-gitea-sec \
+  --revision "$(az containerapp revision list \
+      --name ca-gitea \
+      --resource-group rg-gitea-sec \
+      --query '[0].name' -o tsv)"
+```
+
+Expected: `ContainerAppSystemLogs_CL` receives `Restarting` entries. Run KQL query **#2**.
+
+### alert-abnormal-traffic
+
+Run `scripts/validation/traffic-gen.sh` to send >500 requests in one minute:
+
+```bash
+cd scripts/validation
+./traffic-gen.sh
+# Wait ~2 min, then check Azure Monitor → Alerts
+```
+
+Expected: alert fires. Run KQL query **#5** to visualise the spike.
+
+### alert-local-auth-attempt
+
+This alert fires on any sign-in that does not go through OAuth2/OIDC. Because
+OIDC is not configured in the current PoC deployment, any successful or failed
+admin login via the Gitea web UI counts. Run the brute-force sim or simply
+attempt to log in manually via the browser.
+
+Run KQL query **#6** to see local auth events in the log stream.
