@@ -78,7 +78,12 @@ After a container restart the admin user must be recreated using the same comman
 | `GITEA__database__DB_TYPE` | `sqlite3` | Database engine |
 | `GITEA__database__PATH` | `/gitea-db/gitea.db` | DB on EmptyDir (local, POSIX-lockable) |
 | `GITEA__git__HOME_PATH` | `/tmp/gitea-home` | Git config scratch dir (Azure Files SMB chmod fix) |
-| `GITEA__security__SECRET_KEY` | (from Key Vault) | Session signing key |
+| `GITEA__security__SECRET_KEY` | (from Key Vault) | Session signing key — prevents token forgery |
+| `GITEA__session__COOKIE_SECURE` | `true` | Session cookie only sent over HTTPS, never plain HTTP |
+| `GITEA__session__SAME_SITE` | `lax` | Prevents CSRF — cookie not sent on cross-origin POST requests |
+| `GITEA__session__SESSION_LIFE_TIME` | `3600` | Session expires after 1 hour — limits stolen-cookie replay window |
+| `GITEA__security__REVERSE_PROXY_LIMIT` | `1` | Trust one proxy hop (the WAF sidecar on localhost) |
+| `GITEA__security__REVERSE_PROXY_TRUSTED_PROXIES` | `127.0.0.1/8` | WAF is on localhost — real client IP read from X-Forwarded-For |
 | `GITEA__log__LEVEL` | `Info` | Log verbosity |
 | `GITEA__log__ROOT_PATH` | `/var/lib/gitea/log` | Log files on Azure Files |
 
@@ -101,10 +106,14 @@ After a container restart the admin user must be recreated using the same comman
 | `REQUIRE_SIGNIN_VIEW` | `true` | No anonymous repository browsing |
 | `DISABLE_SSH` | `true` | Reduces attack surface; HTTPS-only |
 | `INSTALL_LOCK` | `true` | Prevents unauthenticated initial configuration |
+| `COOKIE_SECURE` | `true` | Session cookie rejected by browser over plain HTTP |
+| `SAME_SITE` | `lax` | Prevents CSRF via cross-origin cookie submission |
+| `SESSION_LIFE_TIME` | `3600` (1 h) | Stolen cookie expires quickly; forces re-authentication |
+| `REVERSE_PROXY_LIMIT` | `1` | Real client IPs logged correctly; rate limiting works |
 | Image | `latest-rootless` (UID 1000) | No root in container |
 | Secrets | Key Vault references | No plaintext passwords in config or env |
 | Replicas | max 1 | SQLite requires single writer |
-| WAF sidecar | ModSecurity + OWASP CRS (blocking) | Blocks SQLi, XSS, path traversal at ingress |
+| WAF sidecar | ModSecurity + OWASP CRS (blocking) | Blocks SQLi, XSS, path traversal — the primary XSS defence that protects cookies |
 
 ## Entra ID OIDC Setup (optional)
 

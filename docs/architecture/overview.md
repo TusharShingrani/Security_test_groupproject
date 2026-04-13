@@ -118,6 +118,10 @@ The deploy job authenticates via OIDC federated credentials on the
 | Application | Auth required | `REQUIRE_SIGNIN_VIEW=true` |
 | Application | No installer | `INSTALL_LOCK=true` |
 | Application | MFA | Gitea TOTP (`docs/evidence/mfa-setup.md`) |
+| Application | Session cookie HTTPS-only | `COOKIE_SECURE=true` — cookie never sent over plain HTTP |
+| Application | CSRF protection | `SAME_SITE=lax` — cookie not submitted on cross-origin POST |
+| Application | Session timeout | `SESSION_LIFE_TIME=3600` — 1-hour session cap |
+| Application | Real IP tracking | `REVERSE_PROXY_LIMIT=1` — WAF forwards real client IP |
 | Identity | Admin RBAC | Gitea role-based access control |
 | Secrets | No plaintext creds | Key Vault + Managed Identity |
 | Container | Non-root | `latest-rootless` image (UID 1000) |

@@ -225,6 +225,45 @@ resource "azurerm_container_app" "gitea" {
         secret_name = "gitea-secret-key"
       }
 
+      # ── Session hardening ────────────────────────────────────────────────
+      # COOKIE_SECURE: session cookie is only sent over HTTPS, never plain HTTP.
+      # A stolen cookie cannot be replayed over an unencrypted channel.
+      env {
+        name  = "GITEA__session__COOKIE_SECURE"
+        value = "true"
+      }
+
+      # SAME_SITE=lax: browser only sends cookie on same-site navigations and
+      # top-level GET cross-site navigations. Blocks CSRF attacks that rely on
+      # the browser auto-submitting the session cookie to a third-party origin.
+      env {
+        name  = "GITEA__session__SAME_SITE"
+        value = "lax"
+      }
+
+      # SESSION_LIFE_TIME: session expires after 1 hour of total age.
+      # Limits the window in which a stolen cookie can be replayed.
+      # Default is 86400 (24 h) — too long for an admin-only platform.
+      env {
+        name  = "GITEA__session__SESSION_LIFE_TIME"
+        value = "3600"
+      }
+
+      # ── Reverse proxy trust ──────────────────────────────────────────────
+      # Gitea is behind the WAF sidecar on localhost. Without this, Gitea
+      # sees 127.0.0.1 as every client IP, which breaks rate-limiting and
+      # audit logs. REVERSE_PROXY_LIMIT=1 tells Gitea to trust one proxy hop
+      # and read the real client IP from X-Forwarded-For.
+      env {
+        name  = "GITEA__security__REVERSE_PROXY_LIMIT"
+        value = "1"
+      }
+
+      env {
+        name  = "GITEA__security__REVERSE_PROXY_TRUSTED_PROXIES"
+        value = "127.0.0.1/8"
+      }
+
       env {
         name  = "GITEA__log__LEVEL"
         value = "Info"
