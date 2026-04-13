@@ -1,8 +1,9 @@
 name: DAST — ZAP Baseline Scan
 
-# Run manually only — DAST against the live Gitea instance.
-# This is intentionally NOT wired to push/PR to avoid hammering the app on every commit.
+# Runs automatically every Monday at 06:00 UTC and on manual trigger.
 on:
+  schedule:
+    - cron: '0 6 * * 1'   # Every Monday 06:00 UTC
   workflow_dispatch:
     inputs:
       target_url:
@@ -25,7 +26,8 @@ jobs:
       - name: ZAP Baseline Scan
         uses: zaproxy/action-baseline@v0.12.0
         with:
-          target: ${{ github.event.inputs.target_url }}
+          # Falls back to live Gitea URL when triggered by schedule (inputs not set)
+          target: ${{ github.event.inputs.target_url || 'https://ca-gitea.wittydune-da50dd5c.norwayeast.azurecontainerapps.io' }}
           # Warn on new alerts but do not fail the job — evidence capture, not gate
           fail_action: false
           # Use Ajax spider to follow the login redirect on REQUIRE_SIGNIN_VIEW=true
