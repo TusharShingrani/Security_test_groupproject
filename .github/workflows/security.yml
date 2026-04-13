@@ -92,12 +92,13 @@ jobs:
           # CKV_AZURE_42: KV recoverability requires purge_protection=true — disabled for PoC teardown convenience.
           skip_check: "CKV_AZURE_109,CKV_AZURE_189,CKV_AZURE_110,CKV_AZURE_42,CKV2_AZURE_32,CKV_AZURE_41,CKV_AZURE_59,CKV_AZURE_33,CKV_AZURE_206,CKV2_AZURE_41,CKV2_AZURE_38,CKV2_AZURE_40,CKV2_AZURE_1,CKV2_AZURE_33"
 
-      - name: Upload Checkov SARIF
-        uses: github/codeql-action/upload-sarif@v3
+      - name: Upload Checkov results
+        uses: actions/upload-artifact@v4
         if: always()
         with:
-          sarif_file: checkov-results.sarif
-        continue-on-error: true
+          name: checkov-results
+          path: checkov-results.sarif
+          retention-days: 30
 
   # ── 4. Container Image Scan ───────────────────────────────────────────────
   trivy:
@@ -111,6 +112,7 @@ jobs:
         with:
           image-ref: gitea/gitea:latest-rootless
           format: table
+          output: trivy-results.txt
           exit-code: '1'
           ignore-unfixed: true
           trivyignores: .trivyignore
@@ -118,24 +120,13 @@ jobs:
           severity: CRITICAL,HIGH
         # Fails if CRITICAL or HIGH unfixed CVEs are found (Go stdlib CVEs requiring upstream rebuild are in .trivyignore)
 
-      - name: Trivy SARIF output
-        uses: aquasecurity/trivy-action@master
+      - name: Upload Trivy results
+        uses: actions/upload-artifact@v4
         if: always()
         with:
-          image-ref: gitea/gitea:latest-rootless
-          format: sarif
-          output: trivy-results.sarif
-          ignore-unfixed: true
-          trivyignores: .trivyignore
-          vuln-type: os,library
-          severity: CRITICAL,HIGH
-
-      - name: Upload Trivy SARIF
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: trivy-results.sarif
-        continue-on-error: true
+          name: trivy-results
+          path: trivy-results.txt
+          retention-days: 30
 
   # ── 5. Deploy (apply) ─────────────────────────────────────────────────────
   deploy:
