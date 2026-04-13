@@ -1,0 +1,47 @@
+name: DAST — ZAP Baseline Scan
+
+# Run manually only — DAST against the live Gitea instance.
+# This is intentionally NOT wired to push/PR to avoid hammering the app on every commit.
+on:
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: "Target URL to scan (default: live Gitea)"
+        required: false
+        default: "https://ca-gitea.wittydune-da50dd5c.norwayeast.azurecontainerapps.io"
+
+permissions:
+  contents: read
+  issues: write   # ZAP action creates/updates a GitHub issue with results
+
+jobs:
+  zap-baseline:
+    name: OWASP ZAP — Baseline Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: ${{ github.event.inputs.target_url }}
+          # Warn on new alerts but do not fail the job — evidence capture, not gate
+          fail_action: false
+          # Use Ajax spider to follow the login redirect on REQUIRE_SIGNIN_VIEW=true
+          ajax_spider: true
+          # Suppress informational alerts in the summary; still appear in full report
+          cmd_options: "-I"
+          # HTML + JSON + Markdown reports
+          allow_issue_writing: true
+
+      - name: Upload ZAP reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: zap-reports
+          path: |
+            report_html.html
+            report_json.json
+            report_md.md
+          retention-days: 30
