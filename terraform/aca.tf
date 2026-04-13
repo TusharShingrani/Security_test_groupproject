@@ -18,6 +18,11 @@ resource "azurerm_container_app_environment_storage" "gitea" {
 }
 
 # Gitea Container App
+# Architecture: Internet → WAF sidecar (port 8080) → Gitea (localhost:3000)
+# The ingress target_port points at the WAF. ModSecurity inspects every request
+# before it reaches Gitea, blocking SQLi, XSS, path traversal, and other OWASP
+# CRS rule matches. Both containers share the same network namespace so the
+# WAF reaches Gitea via localhost.
 resource "azurerm_container_app" "gitea" {
   name                         = "ca-gitea"
   container_app_environment_id = azurerm_container_app_environment.main.id
@@ -49,9 +54,10 @@ resource "azurerm_container_app" "gitea" {
     value = azurerm_storage_account.main.primary_access_key
   }
 
+  # All external traffic enters on port 8080 (WAF) — not directly on Gitea port 3000
   ingress {
     external_enabled = true
-    target_port      = 3000
+    target_port      = 8080
     transport        = "http"
 
     traffic_weight {
@@ -79,6 +85,80 @@ resource "azurerm_container_app" "gitea" {
       storage_type = "EmptyDir"
     }
 
+    # ── WAF sidecar — NGINX + ModSecurity + OWASP CRS ──────────────────────
+    # Listens on port 8080, proxies clean requests to localhost:3000 (Gitea).
+    # Blocks requests that match OWASP CRS rules (SQLi, XSS, path traversal,
+    # known scanner user-agents, Log4Shell, etc.) before they reach Gitea.
+    container {
+      name   = "waf"
+      image  = "owasp/modsecurity-crs:nginx-alpine"
+      cpu    = 0.25
+      memory = "0.5Gi"
+
+      # Proxy to Gitea on localhost (shared network namespace)
+      env {
+        name  = "BACKEND"
+        value = "http://localhost:3000"
+      }
+
+      # Blocking mode — requests matching OWASP CRS rules return 403
+      env {
+        name  = "MODSEC_RULE_ENGINE"
+        value = "On"
+      }
+
+      # Paranoia level 1 (CRS default) — low false-positive rate
+      env {
+        name  = "PARANOIA"
+        value = "1"
+      }
+
+      # Inbound anomaly score threshold: 5 (CRS default)
+      env {
+        name  = "ANOMALY_INBOUND"
+        value = "5"
+      }
+
+      # Listen on port 8080 (non-root compatible)
+      env {
+        name  = "PORT"
+        value = "8080"
+      }
+
+      # Allow larger request bodies for git push payloads
+      env {
+        name  = "MODSEC_REQ_BODY_LIMIT"
+        value = "52428800"
+      }
+
+      env {
+        name  = "NGINX_CLIENT_MAX_BODY_SIZE"
+        value = "50m"
+      }
+
+      liveness_probe {
+        transport = "HTTP"
+        path      = "/healthz"
+        port      = 8080
+
+        initial_delay           = 15
+        interval_seconds        = 30
+        failure_count_threshold = 3
+      }
+
+      readiness_probe {
+        transport = "HTTP"
+        path      = "/healthz"
+        port      = 8080
+
+        interval_seconds        = 10
+        failure_count_threshold = 3
+      }
+    }
+
+    # ── Gitea container ─────────────────────────────────────────────────────
+    # Listens on port 3000 — internal only, not exposed via ingress.
+    # All external traffic passes through the WAF sidecar above.
     container {
       name   = "gitea"
       image  = var.gitea_image
@@ -167,7 +247,7 @@ resource "azurerm_container_app" "gitea" {
         path = "/gitea-db"
       }
 
-      # Liveness probe
+      # Liveness probe — checks Gitea directly on its internal port
       liveness_probe {
         transport = "HTTP"
         path      = "/"
@@ -178,7 +258,6 @@ resource "azurerm_container_app" "gitea" {
         failure_count_threshold = 3
       }
 
-      # Readiness probe
       readiness_probe {
         transport = "HTTP"
         path      = "/"

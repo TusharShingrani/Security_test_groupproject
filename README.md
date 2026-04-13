@@ -82,7 +82,7 @@ See [docs/architecture/overview.md](docs/architecture/overview.md) for full deta
 | IaC scanning | Checkov | Insecure Terraform configurations |
 | Image scanning | Trivy | Vulnerable container images |
 | DAST | OWASP ZAP baseline (`scripts/dast/`, `dast.yml`) | Web app vulnerabilities (SQLi, XSS, misconfig) |
-| WAF (local) | NGINX + ModSecurity + OWASP CRS (`scripts/waf/`) | SQLi, XSS, path traversal, known scanner patterns |
+| WAF | NGINX + ModSecurity + OWASP CRS (sidecar, always on) | SQLi, XSS, path traversal, known scanner patterns |
 | Monitoring | Log Analytics + 4 alert rules | Failed logins, restarts, traffic spikes |
 | HTTPS-only | Container Apps ingress (TLS 1.2+) | Plaintext traffic |
 | Registration disabled | `DISABLE_REGISTRATION=true` | Unauthorized account creation |
@@ -332,7 +332,7 @@ Risk matrix: [docs/risk-analysis/risk-matrix.md](docs/risk-analysis/risk-matrix.
 | Key Vault purge protection disabled | Easier PoC teardown | Enable in production |
 | Key Vault network ACLs allow all | Container Apps Consumption plan has no VNet injection | Tighten to deny + IP allowlist in production |
 | No Entra ID OIDC configured | Student subscription restricts app registration creation | Use CLI (`az ad app ...`) with tenant admin; Gitea TOTP is a compensating control |
-| WAF is local only (no Azure Front Door) | Azure Front Door WAF requires Premium tier (cost) | `scripts/waf/` for evidence; Azure Front Door for production |
+| WAF uses PARANOIA=1 (CRS default) | Higher paranoia levels increase false-positive rate | Increase to level 2–3 in production and tune exclusions as needed |
 
 ---
 

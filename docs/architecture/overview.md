@@ -10,23 +10,33 @@
     │  Azure Container Apps     │
     │  Ingress (managed)        │
     └────────────┬──────────────┘
-                 │
+                 │ port 8080
                  ▼
-    ┌───────────────────────────┐
-    │   Gitea (ca-gitea)        │
-    │   gitea/gitea:latest-rootless│
-    │   UID 1000, Port 3000     │
-    └──────┬──────────┬─────────┘
-           │          │
-           ▼          ▼
+    ┌────────────────────────────────────────┐
+    │            ca-gitea (Container App)    │
+    │                                        │
+    │  ┌──────────────────────────────────┐  │
+    │  │  WAF sidecar                     │  │
+    │  │  owasp/modsecurity-crs:nginx-alpine│ │
+    │  │  Port 8080 — OWASP CRS blocking  │  │
+    │  └──────────────┬───────────────────┘  │
+    │                 │ localhost:3000        │
+    │                 ▼                      │
+    │  ┌──────────────────────────────────┐  │
+    │  │  Gitea                           │  │
+    │  │  gitea/gitea:latest-rootless     │  │
+    │  │  UID 1000, Port 3000 (internal)  │  │
+    │  └──────┬──────────────┬────────────┘  │
+    └─────────┼──────────────┼───────────────┘
+              │              │
+              ▼              ▼
   ┌──────────────┐  ┌──────────────────┐
   │  Key Vault   │  │  Azure Files     │
   │  kv-gitea-xx │  │  /var/lib/gitea  │
-  │              │  │  repos, avatars  │
-  │  - admin pw  │  │  attachments     │
-  │  - secret key│  │  logs            │
-  │  - OIDC sec  │  └──────────────────┘
-  └──────────────┘
+  │  - admin pw  │  │  repos, avatars  │
+  │  - secret key│  │  attachments     │
+  │  - OIDC sec  │  │  logs            │
+  └──────────────┘  └──────────────────┘
         ▲           ┌──────────────────┐
         │ managed   │  EmptyDir (local)│
         │ identity  │  /gitea-db       │
@@ -40,10 +50,10 @@
   │  law-gitea-sec   │     │  4 alert rules   │
   └──────────────────┘     └──────────────────┘
 
-  Local tooling (not deployed to Azure):
+  Local tooling:
   ┌──────────────────────────────────────────┐
-  │  scripts/waf/  NGINX + ModSecurity CRS  │  http://localhost:8080 → Gitea
-  │  scripts/dast/ OWASP ZAP baseline scan  │  Docker-based, manual run
+  │  scripts/dast/ OWASP ZAP baseline scan  │  Docker, weekly via dast.yml
+  │  scripts/waf/  docker-compose for local │  Manual attack-pattern testing
   └──────────────────────────────────────────┘
 ```
 
@@ -116,7 +126,7 @@ The deploy job authenticates via OIDC federated credentials on the
 | Code | Secret detection | Gitleaks on every push |
 | Image | CVE scanning | Trivy — fails on unaccepted CRITICAL/HIGH |
 | DAST | Web app testing | OWASP ZAP baseline (`scripts/dast/`, `dast.yml`) |
-| WAF | Attack blocking | NGINX + ModSecurity + OWASP CRS (`scripts/waf/`) |
+| WAF | Attack blocking | NGINX + ModSecurity + OWASP CRS (sidecar in `terraform/aca.tf`, always on) |
 | Monitoring | Alerting | Log Analytics + 4 Azure Monitor alert rules |
 | CI/CD | No stored secrets | OIDC federated credentials |
 

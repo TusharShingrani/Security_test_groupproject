@@ -7,7 +7,6 @@ on:
     paths:
       - 'terraform/**'
       - 'containers/**'
-      - 'scripts/waf/**'
       - '.github/workflows/security.yml'
   pull_request:
     branches:
@@ -133,43 +132,7 @@ jobs:
           path: trivy-results.txt
           retention-days: 30
 
-  # ── 5. WAF Validation ────────────────────────────────────────────────────
-  waf-test:
-    name: WAF — ModSecurity Validation
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Start WAF container
-        working-directory: scripts/waf
-        env:
-          GITEA_URL: "https://ca-gitea.wittydune-da50dd5c.norwayeast.azurecontainerapps.io"
-        run: docker compose up -d
-
-      - name: Wait for WAF to be healthy (up to 60s)
-        run: |
-          for i in $(seq 1 30); do
-            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 http://localhost:8080/ 2>/dev/null || true)
-            if [ -n "${code}" ] && [ "${code}" != "000" ]; then
-              echo "WAF ready (HTTP ${code})"
-              exit 0
-            fi
-            echo "Waiting for WAF... attempt ${i}/30"
-            sleep 2
-          done
-          echo "WAF did not become ready in time"
-          docker compose -f scripts/waf/docker-compose.yml logs
-          exit 1
-
-      - name: Run WAF attack-pattern tests
-        run: ./scripts/waf/test-waf.sh http://localhost:8080
-
-      - name: Stop WAF container
-        if: always()
-        working-directory: scripts/waf
-        run: docker compose down
-
-  # ── 6. Deploy (apply) ─────────────────────────────────────────────────────
+  # ── 5. Deploy (apply) ─────────────────────────────────────────────────────
   deploy:
     name: Terraform — Deploy
     runs-on: ubuntu-latest
