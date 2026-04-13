@@ -18,7 +18,7 @@ Risk Score = Probability × Impact
 | R10 | Log Analytics unavailable | 1 | 3 | 3 | Azure SLA 99.9% + 30-day log retention | Low (1×2=2) |
 | R11 | Azure Files data loss | 1 | 5 | 5 | LRS replication (3 copies in region) | Low (1×3=3) |
 | R12 | OIDC misconfiguration | 2 | 4 | 8 | Manual setup documented + test validation | Medium (2×2=4) |
-| R13 | Web app vulnerability (XSS, SQLi) | 2 | 4 | 8 | OWASP ZAP DAST scan + ModSecurity WAF | Low (1×2=2) |
+| R13 | Web app vulnerability (XSS, SQLi) | 2 | 4 | 8 | ModSecurity WAF sidecar (always on, blocking) + OWASP ZAP DAST (weekly) | Low (1×2=2) |
 
 ## Risk Heat Map
 
@@ -57,7 +57,8 @@ Impact
 | Log Analytics 30-day retention | R10 |
 | Azure Files LRS replication | R11 |
 | OIDC federated credentials (documented setup) | R12 |
-| OWASP ZAP DAST + NGINX ModSecurity WAF | R13 |
+| ModSecurity WAF sidecar (always-on, blocking mode) | R13 |
+| OWASP ZAP DAST baseline (weekly schedule) | R13 |
 
 ## Notes on Accepted Residual Risks
 

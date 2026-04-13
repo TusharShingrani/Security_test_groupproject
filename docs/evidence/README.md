@@ -86,11 +86,16 @@ docs/evidence/
 **Run:** `./scripts/dast/run-zap-baseline.sh` (or trigger the `dast.yml` Actions workflow)
 
 ### WAF
-- [ ] WAF container started and proxying to Gitea
-- [ ] Normal requests pass (200/302)
-- [ ] Attack payloads blocked (403): SQLi, XSS, path traversal, Log4Shell, sqlmap UA
+The WAF is always deployed as a sidecar — no setup needed. Test directly against the live URL.
 
-**Run:** `cd scripts/waf && docker compose up -d && ./test-waf.sh`
+- [ ] Normal requests return 200 or 302 (not blocked by WAF)
+- [ ] Attack payloads blocked (403): SQLi, XSS, path traversal, Log4Shell, sqlmap UA
+- [ ] WAF block entries visible in Log Analytics (KQL query #9)
+
+**Run:**
+```bash
+./scripts/waf/test-waf.sh https://ca-gitea.wittydune-da50dd5c.norwayeast.azurecontainerapps.io
+```
 
 ### Monitoring
 - [ ] KQL query `ContainerAppConsoleLogs_CL` returns Gitea log entries
@@ -122,15 +127,31 @@ ContainerAppConsoleLogs_CL
 | take 50
 ```
 
-See [docs/detections/kql-queries.md](../detections/kql-queries.md) for all 8 queries
-and instructions on how to trigger each alert.
+See [docs/detections/kql-queries.md](../detections/kql-queries.md) for all 9 queries
+(including query #9 for WAF block entries) and instructions on how to trigger each alert.
+
+## How to View WAF Logs
+
+```bash
+# Live WAF log stream
+az containerapp logs show \
+  --name ca-gitea \
+  --resource-group rg-gitea-sec \
+  --container waf \
+  --type console \
+  --follow
+```
 
 ## How to Recreate Admin User (after container restart)
+
+> **Important:** The Container App now has two containers. Specify `--container gitea`
+> to open a shell in Gitea, not the WAF sidecar.
 
 ```bash
 az containerapp exec \
   --name ca-gitea \
   --resource-group rg-gitea-sec \
+  --container gitea \
   --command /bin/sh
 ```
 ```sh

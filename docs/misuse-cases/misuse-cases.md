@@ -11,6 +11,7 @@
 3. Attempts to register a new account to gain access
 
 **Controls in place:**
+- WAF sidecar (ModSecurity + OWASP CRS) — inspects every request before it reaches Gitea
 - `REQUIRE_SIGNIN_VIEW=true` — all pages redirect to login; no anonymous browsing
 - `DISABLE_REGISTRATION=true` — registration page returns HTTP 403
 - `INSTALL_LOCK=true` — web installer is not accessible
@@ -157,10 +158,13 @@ python3 scripts/validation/brute-force-sim.py
 2. Crafts an exploit payload targeting the vulnerable component
 
 **Controls in place:**
+- WAF sidecar (ModSecurity + OWASP CRS) intercepts all HTTP requests — many CVE
+  exploit payloads (path traversal, injection, malformed headers) are blocked before
+  reaching Gitea
 - Trivy scans the container image on every pipeline run
 - Pipeline fails if any CRITICAL or HIGH unfixed CVE is found outside `.trivyignore`
 - Rootless container (UID 1000) limits blast radius even if a CVE is exploited
-- SSH is disabled — attack surface is limited to HTTPS port 3000
+- SSH is disabled — attack surface is limited to HTTPS port 3000 (internal), routed via WAF
 
 **Expected result:**
 - Accepted CVEs (Go stdlib requiring upstream rebuild) are in `.trivyignore`
@@ -172,3 +176,41 @@ python3 scripts/validation/brute-force-sim.py
 - Or run locally: `trivy image --ignore-file .trivyignore gitea/gitea:latest-rootless`
 
 **Evidence:** `docs/evidence/phase6-container-vulnerabilities/`
+
+---
+
+## MC-07: Web Application Attack (SQLi / XSS / Injection)
+
+**Actor:** External attacker  
+**Goal:** Exploit a web application vulnerability in Gitea using common OWASP Top 10 attack patterns
+
+**Attack path:**
+1. Attacker crafts a malicious request containing a SQL injection, XSS payload, path traversal,
+   Log4Shell header, or known scanner user-agent
+2. Request is sent to the Gitea HTTPS endpoint
+
+**Controls in place:**
+- WAF sidecar (ModSecurity + OWASP CRS, blocking mode) sits in front of Gitea
+- All incoming requests are inspected against 1000+ CRS rules before forwarding
+- Matching requests are rejected with HTTP 403; Gitea never processes them
+- WAF runs at PARANOIA=1 (CRS default) — low false-positive rate for normal usage
+
+**Expected result:**
+- SQLi patterns (e.g. `' OR '1'='1`) → 403 Forbidden from ModSecurity
+- XSS patterns (e.g. `<script>alert(1)</script>`) → 403 Forbidden
+- Path traversal (e.g. `/../../../etc/passwd`) → 403 Forbidden
+- Log4Shell header (`${jndi:ldap://...}`) → 403 Forbidden
+- Known scanner UA (e.g. `sqlmap`) → 403 Forbidden
+- Normal browser requests → pass through to Gitea (200/302)
+
+**Validation:**
+```bash
+# Test against the live WAF sidecar — no local Docker setup needed
+./scripts/waf/test-waf.sh https://ca-gitea.wittydune-da50dd5c.norwayeast.azurecontainerapps.io
+```
+
+Expected output: all 6 attack tests show `PASS [403]`, all 3 normal tests show `PASS [200|302]`.
+
+Check WAF block entries in Log Analytics with KQL query #9 from `docs/detections/kql-queries.md`.
+
+**Evidence:** `docs/evidence/phase10-waf/`

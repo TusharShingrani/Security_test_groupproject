@@ -132,6 +132,37 @@ AlertsManagementResources
 
 ---
 
+## 9. WAF — ModSecurity Blocked Requests
+
+Shows all requests blocked by the ModSecurity WAF sidecar. The WAF container
+(`waf`) writes audit log entries to stdout, which Container Apps forwards to
+Log Analytics alongside Gitea's own logs.
+
+```kql
+ContainerAppConsoleLogs_CL
+| where ContainerAppName_s == "ca-gitea"
+| where ContainerName_s == "waf"
+| where Log_s contains "Access denied" or Log_s contains "blocked" or Log_s contains "id \""
+| extend RuleId   = extract(@'id "(\d+)"', 1, Log_s)
+| extend ClientIP = extract(@'client (\d+\.\d+\.\d+\.\d+)', 1, Log_s)
+| extend Uri      = extract(@'uri "([^"]+)"', 1, Log_s)
+| project TimeGenerated, ClientIP, Uri, RuleId, Log_s
+| order by TimeGenerated desc
+```
+
+To see all WAF container output (including non-blocking informational lines):
+
+```kql
+ContainerAppConsoleLogs_CL
+| where ContainerAppName_s == "ca-gitea"
+| where ContainerName_s == "waf"
+| project TimeGenerated, Log_s
+| order by TimeGenerated desc
+| take 100
+```
+
+---
+
 ## How to Trigger Each Alert (for evidence capture)
 
 ### alert-failed-logins (MC-02)

@@ -25,7 +25,7 @@
 | Storage Account | `sagitea<random>` | Azure Files for Gitea persistence (repos, logs) |
 | File Share | `gitea-data` (10 GiB) | Mounted at `/var/lib/gitea` in container |
 | Container Apps Environment | `cae-gitea-sec` | Managed container runtime (Consumption plan) |
-| Container App | `ca-gitea` | Gitea application (1 replica, `latest-rootless`) |
+| Container App | `ca-gitea` | Two containers: WAF sidecar (`owasp/modsecurity-crs:nginx-alpine`, 0.25 vCPU / 0.5Gi) + Gitea (`latest-rootless`, 0.5 vCPU / 1Gi). 1 replica. |
 
 ## OIDC Federated Credentials (on `wss-poc-github-oidc`)
 
@@ -71,8 +71,13 @@ Azure Files continues to store git repositories, avatars, attachments, and log f
 
 | Resource | Tier | Est. Cost/month |
 |---|---|---|
-| Container Apps (Consumption) | Pay-per-use, 0.5 vCPU / 1 GiB | ~$5–15 |
+| Container Apps — Gitea (Consumption) | Pay-per-use, 0.5 vCPU / 1 GiB | ~$5–15 |
+| Container Apps — WAF sidecar (Consumption) | Pay-per-use, 0.25 vCPU / 0.5 GiB | ~$3–8 |
 | Storage Account (LRS) | Standard, 10 GiB file share | ~$1 |
 | Log Analytics | Pay-per-GB (first 5 GB free) | ~$0–2 |
 | Key Vault | Standard (10k ops/month free) | ~$0 |
-| **Total** | | **~$6–18/month** |
+| **Total** | | **~$9–26/month** |
+
+> The WAF sidecar runs in the same Container App replica as Gitea. Both containers
+> count toward the Consumption plan billing. The WAF adds roughly 50% to the
+> compute cost but provides always-on ModSecurity protection at no extra infrastructure.

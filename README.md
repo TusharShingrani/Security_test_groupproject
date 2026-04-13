@@ -223,9 +223,11 @@ terraform output gitea_url
 via the Container Apps exec shell:
 
 ```bash
+# --container gitea is required — the app now has two containers (waf + gitea)
 az containerapp exec \
   --name ca-gitea \
   --resource-group rg-gitea-sec \
+  --container gitea \
   --command /bin/sh
 ```
 
@@ -301,6 +303,7 @@ cd scripts/waf && docker compose up -d && ./test-waf.sh
 | MC-04 | Secret leakage via commit | Gitleaks pipeline gate | Push fake secret |
 | MC-05 | Insecure Terraform | Checkov pipeline gate | Add bad config and push |
 | MC-06 | Container CVE exploitation | Trivy pipeline gate | Check Trivy job output |
+| MC-07 | Web app attack (SQLi, XSS, injection) | ModSecurity WAF sidecar | `./scripts/waf/test-waf.sh <live-url>` |
 
 See [docs/misuse-cases/misuse-cases.md](docs/misuse-cases/misuse-cases.md)
 

@@ -1,5 +1,18 @@
 # Gitea Container
 
+## Deployment Architecture
+
+Gitea is deployed as one of **two containers** inside the `ca-gitea` Container App.
+All external traffic passes through the WAF sidecar before reaching Gitea:
+
+```
+Internet (HTTPS) → Container Apps Ingress → WAF sidecar :8080 → Gitea :3000
+```
+
+The WAF container (`owasp/modsecurity-crs:nginx-alpine`) runs ModSecurity with the
+OWASP Core Rule Set in blocking mode. Requests matching CRS rules (SQLi, XSS,
+path traversal, Log4Shell, scanner UAs) are rejected with 403 before Gitea sees them.
+
 ## Image
 
 `gitea/gitea:latest-rootless`
@@ -8,6 +21,7 @@
 - No extra capabilities required
 - Based on Alpine Linux (minimal attack surface)
 - Scanned by Trivy in the CI pipeline; accepted CVEs documented in `/.trivyignore`
+- Listens on port 3000 (internal only — not exposed via ingress)
 
 ## Storage Layout
 
@@ -29,13 +43,16 @@
 ## Admin Setup (first deploy)
 
 `INSTALL_LOCK=true` is set, so the web installer does not appear. The container starts
-directly into production mode. Create the admin user once via the Container Apps exec shell:
+directly into production mode. Create the admin user once via the Container Apps exec shell.
+
+> **Important:** The Container App now has two containers (`waf` and `gitea`). You must
+> specify `--container gitea` to open a shell inside Gitea, not the WAF container.
 
 ```bash
-# Open a shell in the running container
 az containerapp exec \
   --name ca-gitea \
   --resource-group rg-gitea-sec \
+  --container gitea \
   --command /bin/sh
 ```
 
@@ -65,9 +82,20 @@ After a container restart the admin user must be recreated using the same comman
 | `GITEA__log__LEVEL` | `Info` | Log verbosity |
 | `GITEA__log__ROOT_PATH` | `/var/lib/gitea/log` | Log files on Azure Files |
 
+## WAF Sidecar Environment Variables
+
+| Variable | Value | Purpose |
+|---|---|---|
+| `BACKEND` | `http://localhost:3000` | Proxy target (Gitea internal port) |
+| `MODSEC_RULE_ENGINE` | `On` | Blocking mode (DetectionOnly = log only) |
+| `PARANOIA` | `1` | OWASP CRS paranoia level (1=default, low false-positives) |
+| `ANOMALY_INBOUND` | `5` | Inbound anomaly score threshold (CRS default) |
+| `PORT` | `8080` | WAF listening port (non-root compatible) |
+| `MODSEC_REQ_BODY_LIMIT` | `52428800` | 50 MiB body limit for git push payloads |
+
 ## Security Hardening Summary
 
-| Setting | Value | Why |
+| Setting / Component | Value | Why |
 |---|---|---|
 | `DISABLE_REGISTRATION` | `true` | No self-signup; admin creates all accounts |
 | `REQUIRE_SIGNIN_VIEW` | `true` | No anonymous repository browsing |
@@ -76,6 +104,7 @@ After a container restart the admin user must be recreated using the same comman
 | Image | `latest-rootless` (UID 1000) | No root in container |
 | Secrets | Key Vault references | No plaintext passwords in config or env |
 | Replicas | max 1 | SQLite requires single writer |
+| WAF sidecar | ModSecurity + OWASP CRS (blocking) | Blocks SQLi, XSS, path traversal at ingress |
 
 ## Entra ID OIDC Setup (optional)
 
