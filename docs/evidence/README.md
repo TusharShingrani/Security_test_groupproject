@@ -18,51 +18,92 @@ After running the security validation tests, capture screenshots and logs here.
 ```
 docs/evidence/
 ├── phase1-unauthorized-access/
-│   ├── screenshot-registration-blocked.png
-│   └── screenshot-require-signin.png
+│   ├── screenshot-registration-blocked.png   (MC-01b: 403 on /user/sign_up)
+│   └── screenshot-require-signin.png         (MC-01a: redirect to /user/login)
 ├── phase2-brute-force/
-│   ├── screenshot-rate-limit.png
-│   └── screenshot-alert-fired.png
+│   ├── screenshot-rate-limit.png             (login form after failed attempts)
+│   └── screenshot-alert-fired.png            (Azure Monitor alert-failed-logins)
 ├── phase3-privilege-escalation/
-│   ├── screenshot-admin-403.png
-│   └── log-access-denied.txt
+│   ├── screenshot-admin-403.png              (non-admin denied /-/admin/users)
+│   └── log-access-denied.txt                 (KQL query output)
 ├── phase4-secret-leakage/
-│   ├── screenshot-gitleaks-fail.png
-│   └── pipeline-run-url.txt
+│   ├── screenshot-gitleaks-fail.png          (pipeline Gitleaks job failure)
+│   └── pipeline-run-url.txt                  (link to failed pipeline run)
 ├── phase5-insecure-terraform/
-│   ├── screenshot-checkov-fail.png
-│   └── checkov-output.txt
+│   ├── screenshot-checkov-fail.png           (pipeline Checkov job failure)
+│   └── checkov-output.txt                    (Checkov findings text)
 ├── phase6-container-vulnerabilities/
-│   ├── trivy-scan-output.txt
-│   └── screenshot-pipeline-block.png
-└── phase7-monitoring/
-    ├── screenshot-log-analytics-query.png
-    ├── screenshot-alert-rules.png
-    └── kql-results.txt
+│   ├── trivy-scan-output.txt                 (Trivy table output / accepted CVEs)
+│   └── screenshot-pipeline-block.png         (Trivy job in pipeline)
+├── phase7-monitoring/
+│   ├── screenshot-log-analytics-query.png    (KQL query returning Gitea logs)
+│   ├── screenshot-alert-rules.png            (4 rules visible and enabled)
+│   └── kql-results.txt                       (pasted KQL output)
+├── phase8-mfa/
+│   ├── screenshot-totp-prompt.png            (MFA prompt after password entry)
+│   ├── screenshot-totp-success.png           (login success with valid TOTP)
+│   └── screenshot-totp-invalid.png           (rejected invalid TOTP code)
+├── phase9-dast/
+│   ├── zap-report.html                       (ZAP baseline full HTML report)
+│   └── zap-report.json                       (ZAP baseline JSON report)
+└── phase10-waf/
+    ├── screenshot-waf-block.png              (ModSecurity blocking attack request)
+    └── waf-test-output.txt                   (test-waf.sh pass/fail output)
 ```
 
 ## Validation Checklist
 
+### Access Controls
+- [ ] MC-01a: Unauthenticated `GET /` redirects to `/user/login` (`REQUIRE_SIGNIN_VIEW=true`)
+- [ ] MC-01b: `GET /user/sign_up` returns 403 (`DISABLE_REGISTRATION=true`)
+- [ ] MC-03: Unauthenticated `GET /-/admin/users` returns 302/403 (Gitea RBAC)
+
+**Run:** `./scripts/validation/check-access-controls.sh`
+
+### Brute Force / Alerting
+- [ ] MC-02: Failed login alert fires after ≥5 failed attempts in 5 min
+- [ ] Azure Monitor → `alert-failed-logins` shows `Fired` state
+
+**Run:** `python3 scripts/validation/brute-force-sim.py` — then check Azure Monitor
+
 ### Pipeline Gates
 - [ ] MC-04: Gitleaks blocked a commit containing a fake secret
-- [ ] MC-05: Checkov blocked an insecure Terraform change (e.g. `soft_fail: true`)
-- [ ] MC-06: Trivy scan output captured showing CVEs found / ignored
+- [ ] MC-05: Checkov blocked an insecure Terraform change
+- [ ] MC-06: Trivy scan output captured showing accepted CVEs
 
-### Access Controls
-- [ ] MC-01: Unauthenticated access redirects to login (`REQUIRE_SIGNIN_VIEW=true`)
-- [ ] MC-01: Registration page returns 403 / is not accessible (`DISABLE_REGISTRATION=true`)
-- [ ] MC-03: Non-admin user cannot access `/admin` (returns 403)
+### MFA
+- [ ] TOTP enrollment complete (Settings → Security → Two-Factor Authentication)
+- [ ] Password alone shows TOTP prompt (not dashboard)
+- [ ] Password + valid TOTP code grants access
+- [ ] Password + invalid TOTP code is rejected
+
+**See:** `docs/evidence/mfa-setup.md` for exact steps
+
+### DAST
+- [ ] ZAP baseline scan completed against live Gitea URL
+- [ ] ZAP report shows 0 FAIL-level alerts
+
+**Run:** `./scripts/dast/run-zap-baseline.sh` (or trigger the `dast.yml` Actions workflow)
+
+### WAF
+- [ ] WAF container started and proxying to Gitea
+- [ ] Normal requests pass (200/302)
+- [ ] Attack payloads blocked (403): SQLi, XSS, path traversal, Log4Shell, sqlmap UA
+
+**Run:** `cd scripts/waf && docker compose up -d && ./test-waf.sh`
 
 ### Monitoring
 - [ ] KQL query `ContainerAppConsoleLogs_CL` returns Gitea log entries
 - [ ] All 4 alert rules visible and enabled in Azure Monitor
-- [ ] MC-02: Failed login alert fires after ≥5 failed attempts in 5 min
+- [ ] `alert-abnormal-traffic` fires after running `traffic-gen.sh`
 
 ### Infrastructure
 - [ ] `terraform output gitea_url` returns live HTTPS URL
 - [ ] Key Vault secrets accessible only via managed identity (no plaintext in config)
 - [ ] Container App uses `latest-rootless` image (UID 1000, non-root)
 - [ ] Pipeline deploy job authenticates via OIDC (no stored client secret)
+
+---
 
 ## How to View Logs
 
@@ -81,6 +122,9 @@ ContainerAppConsoleLogs_CL
 | take 50
 ```
 
+See [docs/detections/kql-queries.md](../detections/kql-queries.md) for all 8 queries
+and instructions on how to trigger each alert.
+
 ## How to Recreate Admin User (after container restart)
 
 ```bash
@@ -92,3 +136,6 @@ az containerapp exec \
 ```sh
 gitea admin user create --config /etc/gitea/app.ini --admin --username gitea-admin --password 'your-password' --email your@email.com --must-change-password=false
 ```
+
+After recreating the admin user, re-enroll TOTP MFA (enrollment is lost with the ephemeral DB).
+See `docs/evidence/mfa-setup.md`.

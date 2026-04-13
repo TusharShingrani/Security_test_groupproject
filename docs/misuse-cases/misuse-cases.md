@@ -2,107 +2,173 @@
 
 ## MC-01: Unauthorized Access
 
-**Actor:** External attacker
+**Actor:** External attacker  
 **Goal:** Access Gitea without valid credentials
 
 **Attack path:**
-1. Attacker navigates to Gitea URL
-2. Attempts to view repositories without login
-3. Attempts to register a new account
+1. Attacker navigates to the Gitea URL
+2. Attempts to view repositories without logging in
+3. Attempts to register a new account to gain access
+
+**Controls in place:**
+- `REQUIRE_SIGNIN_VIEW=true` — all pages redirect to login; no anonymous browsing
+- `DISABLE_REGISTRATION=true` — registration page returns HTTP 403
+- `INSTALL_LOCK=true` — web installer is not accessible
 
 **Expected result:**
-- `REQUIRE_SIGNIN_VIEW=true` — all pages require login
-- `DISABLE_REGISTRATION=true` — registration page returns 403
-- Only Entra ID login is available
+- `GET /` → 302 redirect to `/user/login`
+- `GET /user/sign_up` → 403 Forbidden
 
-**Validation:** Browse to Gitea URL without session → should redirect to login
+**Validation:**
+```bash
+./scripts/validation/check-access-controls.sh
+```
+
+Expected output: `PASS` for both MC-01a and MC-01b checks.
+
+**Evidence:** `docs/evidence/phase1-unauthorized-access/`
 
 ---
 
 ## MC-02: Brute Force Login
 
-**Actor:** External attacker
+**Actor:** External attacker  
 **Goal:** Guess admin password via repeated login attempts
 
 **Attack path:**
-1. Attacker targets local login form (if enabled)
-2. Runs password list against admin account
+1. Attacker targets the local Gitea login form
+2. Runs a password list against the `gitea-admin` account
+
+**Controls in place:**
+- Gitea rate-limits login attempts (built-in)
+- `alert-failed-logins` Azure Monitor rule fires after ≥5 failed logins in 5 minutes
+- TOTP MFA means even a correct password requires the second factor
 
 **Expected result:**
-- Gitea rate-limits login attempts
-- Failed login alert fires after 5 failures in 15 minutes
-- Entra ID enforced MFA blocks even correct-password attempts
+- Repeated failed logins are logged by Gitea
+- Azure Monitor alert fires within ~5 minutes
+- MFA blocks an attacker who has guessed the password
 
-**Validation:** Run 10 rapid failed login attempts → verify alert in Log Analytics
+**Validation:**
+```bash
+python3 scripts/validation/brute-force-sim.py
+# Then wait ~5 min and check Azure Monitor → Alerts → alert-failed-logins
+```
+
+**Evidence:** `docs/evidence/phase2-brute-force/`
 
 ---
 
 ## MC-03: Privilege Escalation
 
-**Actor:** Authenticated low-privilege user
+**Actor:** Authenticated low-privilege user  
 **Goal:** Gain admin access to Gitea
 
 **Attack path:**
-1. User authenticates via Entra ID
-2. User attempts to access /admin panel
+1. User authenticates via the Gitea login
+2. User attempts to access the admin panel (`/-/admin/users`)
 3. User attempts to modify another user's repositories
 
-**Expected result:**
-- Gitea RBAC denies /admin to non-admin users
-- Entra ID group membership controls admin role assignment
+**Controls in place:**
+- Gitea RBAC: only accounts with the `admin` flag can access admin routes
+- `DISABLE_REGISTRATION=true` means no attacker can self-register a new account
+- Admin account is created explicitly via CLI with `--admin` flag
 
-**Validation:** Login as regular user → attempt to access /admin → should return 403
+**Expected result:**
+- `GET /-/admin/users` as a non-admin → 302 redirect to login or 403
+- Admin panel is inaccessible without the admin flag
+
+**Validation:**
+```bash
+./scripts/validation/check-access-controls.sh
+# MC-03 check tests unauthenticated access to /-/admin/users
+```
+
+**Evidence:** `docs/evidence/phase3-privilege-escalation/`
 
 ---
 
 ## MC-04: Secret Leakage via Code
 
-**Actor:** Developer (insider threat or compromised account)
-**Goal:** Commit secrets (passwords, API keys) to repository
+**Actor:** Developer (insider threat or compromised account)  
+**Goal:** Commit secrets (passwords, API keys) to the repository
 
 **Attack path:**
-1. Developer accidentally commits `.env` file or hardcoded credential
-2. Secret is pushed to Gitea
+1. Developer accidentally includes an `.env` file or hardcoded credential in a commit
+2. Secret is pushed to the `feature/secure-cloud-platform-gitea` branch
+
+**Controls in place:**
+- Gitleaks scans every push in the GitHub Actions pipeline
+- Pipeline fails immediately if any secret pattern is detected
+- The commit is blocked before it can be merged or deployed
 
 **Expected result:**
-- Gitleaks scans every push in GitHub Actions pipeline
-- Pipeline fails if any secret pattern is detected
-- Secret never reaches the repository
+- Pipeline fails on the `gitleaks` job
+- Deploy job does not run (blocked by `needs: [gitleaks, ...]`)
+- Secret never reaches the repository main branch
 
-**Validation:** Commit a file containing a fake AWS key → pipeline should fail
+**Validation:**
+1. Create a test file containing a fake secret: `echo "FAKE_KEY=ghp_xxxxxxxxxxxxxxxxxxxx" > test-secret.txt`
+2. Commit and push to the branch
+3. Observe: Gitleaks job fails in GitHub Actions
+4. Delete the file, push again, pipeline passes
+
+**Evidence:** `docs/evidence/phase4-secret-leakage/`
 
 ---
 
 ## MC-05: Insecure Terraform Deployment
 
-**Actor:** Developer / CI system
-**Goal:** Deploy infrastructure with security misconfigurations
+**Actor:** Developer or CI system  
+**Goal:** Deploy infrastructure with a security misconfiguration
 
 **Attack path:**
-1. Developer writes Terraform with open NSG rule or public storage
-2. Code is pushed and pipeline runs
+1. Developer writes Terraform with an insecure setting (e.g. `soft_fail = true` on Checkov,
+   or `public_network_access_enabled = true` on the storage account)
+2. Code is pushed and the pipeline runs
+
+**Controls in place:**
+- Checkov scans all Terraform files against CIS Azure Benchmarks
+- Pipeline fails before `terraform apply` if any non-skipped check fails
+- Skipped checks are documented with justification in `security.yml`
 
 **Expected result:**
-- Checkov detects misconfiguration
-- Pipeline fails before `terraform apply`
-- Misconfiguration never reaches Azure
+- Checkov detects the misconfiguration
+- Pipeline fails on the `checkov` job
+- `terraform apply` does not run
 
-**Validation:** Add `public_network_access_enabled = true` to storage account → Checkov should fail
+**Validation:**
+1. Edit `terraform/storage.tf` to add `public_network_access_enabled = true`
+2. Push to the branch — Checkov job should fail (CKV_AZURE_59 is in the skip list,
+   but removing it from the skip list and enabling it would trigger a failure)
+3. Alternatively: remove a justified skip from the `skip_check` list and observe Checkov fail
+
+**Evidence:** `docs/evidence/phase5-insecure-terraform/`
 
 ---
 
 ## MC-06: Container Vulnerability Exploitation
 
-**Actor:** External attacker
-**Goal:** Exploit a known CVE in the Gitea container
+**Actor:** External attacker  
+**Goal:** Exploit a known CVE in the Gitea container image
 
 **Attack path:**
-1. Attacker identifies a CRITICAL CVE in the container image
-2. Attacker crafts exploit payload
+1. Attacker identifies a CRITICAL CVE in `gitea/gitea:latest-rootless`
+2. Crafts an exploit payload targeting the vulnerable component
+
+**Controls in place:**
+- Trivy scans the container image on every pipeline run
+- Pipeline fails if any CRITICAL or HIGH unfixed CVE is found outside `.trivyignore`
+- Rootless container (UID 1000) limits blast radius even if a CVE is exploited
+- SSH is disabled — attack surface is limited to HTTPS port 3000
 
 **Expected result:**
-- Trivy scan detects CRITICAL/HIGH CVEs before deployment
-- Pipeline blocks deployment of vulnerable image
-- Rootless container limits blast radius even if exploited
+- Accepted CVEs (Go stdlib requiring upstream rebuild) are in `.trivyignore`
+- Any new unaccepted CRITICAL/HIGH CVE causes the `trivy` job to fail
+- Deployment is blocked until the image is updated or the CVE is accepted with justification
 
-**Validation:** Point Trivy at an outdated Gitea image → should fail pipeline
+**Validation:**
+- Check the `trivy` job output in GitHub Actions — look for the scan results artifact
+- Or run locally: `trivy image --ignore-file .trivyignore gitea/gitea:latest-rootless`
+
+**Evidence:** `docs/evidence/phase6-container-vulnerabilities/`

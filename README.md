@@ -56,6 +56,12 @@ This project demonstrates a security-first deployment of Gitea (a self-hosted Gi
 
 GitHub Actions pipeline:
   Gitleaks → Terraform fmt/validate → Checkov → Trivy → Deploy
+  (scan results saved as job artifacts — no GitHub Advanced Security required)
+
+Manual evidence tooling (local):
+  scripts/dast/       → OWASP ZAP baseline scan (Docker)
+  scripts/waf/        → NGINX + ModSecurity + OWASP CRS reverse proxy (Docker)
+  scripts/validation/ → access control checks, brute-force sim, traffic gen
 ```
 
 > **Note:** The SQLite database is stored on an EmptyDir (local ephemeral) volume, not
@@ -75,12 +81,15 @@ See [docs/architecture/overview.md](docs/architecture/overview.md) for full deta
 | Secret scanning | Gitleaks | Secrets committed to git history |
 | IaC scanning | Checkov | Insecure Terraform configurations |
 | Image scanning | Trivy | Vulnerable container images |
-| Monitoring | Log Analytics + 4 alert rules | Failed logins, restarts, anomalies |
+| DAST | OWASP ZAP baseline (`scripts/dast/`, `dast.yml`) | Web app vulnerabilities (SQLi, XSS, misconfig) |
+| WAF (local) | NGINX + ModSecurity + OWASP CRS (`scripts/waf/`) | SQLi, XSS, path traversal, known scanner patterns |
+| Monitoring | Log Analytics + 4 alert rules | Failed logins, restarts, traffic spikes |
 | HTTPS-only | Container Apps ingress (TLS 1.2+) | Plaintext traffic |
 | Registration disabled | `DISABLE_REGISTRATION=true` | Unauthorized account creation |
 | Anonymous browsing blocked | `REQUIRE_SIGNIN_VIEW=true` | Unauthenticated repository access |
 | SSH disabled | `DISABLE_SSH=true` | SSH attack surface |
 | Rootless container | UID 1000 | Container escape via root |
+| MFA (TOTP) | Gitea built-in two-factor auth | Credential-only compromise of admin account |
 | OIDC CI/CD auth | GitHub Actions federated credentials | Stored CI/CD secrets |
 | Install wizard locked | `INSTALL_LOCK=true` | Unauthenticated initial setup |
 
@@ -100,10 +109,20 @@ See [docs/architecture/overview.md](docs/architecture/overview.md) for full deta
 │   ├── keyvault.tf       # Key Vault + 3 secrets (access policies, not RBAC)
 │   ├── storage.tf        # Storage account + Azure Files share (repos/logs)
 │   ├── aca.tf            # Container Apps Environment + Gitea container
-│   └── outputs.tf        # Gitea URL, Key Vault name, OIDC setup guide
+│   └── outputs.tf        # Gitea URL, Key Vault name
 ├── containers/
 │   └── gitea/
 │       └── README.md     # Container config, admin setup, known limitations
+├── scripts/
+│   ├── dast/
+│   │   └── run-zap-baseline.sh       # Local OWASP ZAP scan (Docker)
+│   ├── validation/
+│   │   ├── check-access-controls.sh  # MC-01 / MC-03 curl-based checks
+│   │   ├── brute-force-sim.py        # MC-02 failed login simulation
+│   │   └── traffic-gen.sh            # Abnormal traffic alert trigger
+│   └── waf/
+│       ├── docker-compose.yml        # NGINX + ModSecurity + OWASP CRS
+│       └── test-waf.sh               # WAF validation (normal + attack payloads)
 ├── docs/
 │   ├── architecture/
 │   │   ├── overview.md            # Full architecture + trust boundaries
@@ -113,13 +132,16 @@ See [docs/architecture/overview.md](docs/architecture/overview.md) for full deta
 │   ├── misuse-cases/
 │   │   └── misuse-cases.md        # 6 attack scenarios with expected results
 │   ├── risk-analysis/
-│   │   └── risk-matrix.md         # Risk matrix with mitigations
+│   │   └── risk-matrix.md         # Risk matrix with probability/impact/mitigations
 │   ├── detections/
-│   │   └── kql-queries.md         # 8 KQL queries for Log Analytics
+│   │   └── kql-queries.md         # 8 KQL queries + alert trigger instructions
+│   ├── control-test-mapping.md    # Every control → test method → expected result
 │   └── evidence/
-│       └── README.md              # Evidence capture checklist
+│       ├── README.md              # Evidence capture checklist
+│       └── mfa-setup.md          # TOTP setup steps + test checklist
 └── .github/workflows/
-    └── security.yml      # DevSecOps pipeline (Gitleaks, Checkov, Trivy, deploy)
+    ├── security.yml      # DevSecOps pipeline (Gitleaks, Checkov, Trivy, deploy)
+    └── dast.yml          # DAST workflow — workflow_dispatch only
 ```
 
 ---
@@ -164,15 +186,6 @@ az ad app federated-credential create \
   }'
 ```
 
-### Azure Provider Registration
-
-The `Microsoft.App` namespace must be registered on the subscription (done once):
-```bash
-az provider register --namespace Microsoft.App --wait
-```
-
-The pipeline registers it automatically via `az provider register` before Terraform runs.
-
 ---
 
 ## Deployment
@@ -180,9 +193,9 @@ The pipeline registers it automatically via `az provider register` before Terraf
 ### Option A — GitHub Actions (recommended)
 
 1. Push to `feature/secure-cloud-platform-gitea`
-2. Pipeline runs automatically: Gitleaks → Terraform validate → Checkov → Trivy → Deploy
+2. Pipeline runs: Gitleaks → Terraform validate → Checkov → Trivy → Deploy
 3. All gates must pass before Terraform applies
-4. Gitea URL is printed at the end of the deploy job
+4. Gitea URL printed at the end of the deploy job
 
 ### Option B — Manual (Azure CLI / Cloud Shell)
 
@@ -216,7 +229,7 @@ az containerapp exec \
   --command /bin/sh
 ```
 
-Then inside the shell (single line):
+Inside the shell (type as a single line):
 ```sh
 gitea admin user create --config /etc/gitea/app.ini --admin --username gitea-admin --password 'your-password' --email your@email.com --must-change-password=false
 ```
@@ -249,38 +262,65 @@ ContainerAppConsoleLogs_CL
 | take 50
 ```
 
-Full KQL query library: [docs/detections/kql-queries.md](docs/detections/kql-queries.md)
-
-> The `ContainerAppConsoleLogs_CL` table appears 2–5 minutes after the Container App
-> first sends logs to the workspace.
+Full KQL query library + alert trigger instructions: [docs/detections/kql-queries.md](docs/detections/kql-queries.md)
 
 ---
 
 ## Security Validation
 
-6 misuse cases tested and documented:
+Use the scripts in `scripts/validation/` and `scripts/dast/` to generate evidence.
+See [docs/control-test-mapping.md](docs/control-test-mapping.md) for the complete mapping
+of every control to its test method and expected result.
 
-| # | Scenario | Control tested |
-|---|---|---|
-| MC-01 | Unauthorized access | `DISABLE_REGISTRATION`, `REQUIRE_SIGNIN_VIEW` |
-| MC-02 | Brute force login | Rate limiting + failed login alert |
-| MC-03 | Privilege escalation | Gitea RBAC + Entra ID groups |
-| MC-04 | Secret leakage via commit | Gitleaks pipeline gate |
-| MC-05 | Insecure Terraform deployment | Checkov pipeline gate |
-| MC-06 | Container vulnerability exploitation | Trivy pipeline gate |
+### Quick reference
+
+```bash
+# MC-01 + MC-03: access control checks
+./scripts/validation/check-access-controls.sh
+
+# MC-02: trigger failed-login alert (7 wrong-password attempts)
+python3 scripts/validation/brute-force-sim.py
+
+# Abnormal traffic alert
+./scripts/validation/traffic-gen.sh
+
+# DAST baseline scan (requires Docker)
+./scripts/dast/run-zap-baseline.sh
+
+# WAF: start proxy then run attack tests
+cd scripts/waf && docker compose up -d && ./test-waf.sh
+```
+
+### Misuse cases
+
+| # | Scenario | Control tested | Test method |
+|---|---|---|---|
+| MC-01 | Unauthorized access | `DISABLE_REGISTRATION`, `REQUIRE_SIGNIN_VIEW` | `check-access-controls.sh` |
+| MC-02 | Brute force login | Failed login alert | `brute-force-sim.py` |
+| MC-03 | Privilege escalation | Gitea RBAC | `check-access-controls.sh` |
+| MC-04 | Secret leakage via commit | Gitleaks pipeline gate | Push fake secret |
+| MC-05 | Insecure Terraform | Checkov pipeline gate | Add bad config and push |
+| MC-06 | Container CVE exploitation | Trivy pipeline gate | Check Trivy job output |
 
 See [docs/misuse-cases/misuse-cases.md](docs/misuse-cases/misuse-cases.md)
-Evidence: [docs/evidence/README.md](docs/evidence/README.md)
+
+---
+
+## MFA
+
+Gitea's built-in TOTP MFA can be enabled for the admin account via:
+**Settings → Security → Two-Factor Authentication → Enroll**
+
+See [docs/evidence/mfa-setup.md](docs/evidence/mfa-setup.md) for exact steps and a
+three-scenario test checklist (password only / password+valid TOTP / password+invalid TOTP).
 
 ---
 
 ## Threat Model
 
-STRIDE analysis across all system components.
-See [docs/threat-model/threat-model.md](docs/threat-model/threat-model.md)
+STRIDE analysis: [docs/threat-model/threat-model.md](docs/threat-model/threat-model.md)
 
-Risk matrix with probability/impact/mitigations:
-See [docs/risk-analysis/risk-matrix.md](docs/risk-analysis/risk-matrix.md)
+Risk matrix: [docs/risk-analysis/risk-matrix.md](docs/risk-analysis/risk-matrix.md)
 
 ---
 
@@ -288,10 +328,11 @@ See [docs/risk-analysis/risk-matrix.md](docs/risk-analysis/risk-matrix.md)
 
 | Limitation | Reason | Mitigation |
 |---|---|---|
-| SQLite DB is ephemeral (EmptyDir) | Azure Files SMB does not support POSIX file locks required by SQLite | For production, replace SQLite with Azure Database for PostgreSQL |
+| SQLite DB is ephemeral (EmptyDir) | Azure Files SMB does not support POSIX file locks required by SQLite | Replace with Azure Database for PostgreSQL in production |
 | Key Vault purge protection disabled | Easier PoC teardown | Enable in production |
-| Key Vault network ACLs allow all | Container Apps Consumption plan has no VNet injection | Tighten to deny + IP rules in production |
-| No Entra ID OIDC configured | Student subscription restricts app registration creation | Configure via CLI with tenant admin assistance |
+| Key Vault network ACLs allow all | Container Apps Consumption plan has no VNet injection | Tighten to deny + IP allowlist in production |
+| No Entra ID OIDC configured | Student subscription restricts app registration creation | Use CLI (`az ad app ...`) with tenant admin; Gitea TOTP is a compensating control |
+| WAF is local only (no Azure Front Door) | Azure Front Door WAF requires Premium tier (cost) | `scripts/waf/` for evidence; Azure Front Door for production |
 
 ---
 
@@ -304,7 +345,7 @@ terraform destroy \
   -var="gitea_oidc_client_secret=not-configured"
 ```
 
-Removes all resources in `rg-gitea-sec`. The Terraform state backend (`rg-tfstate`) is shared and is not destroyed.
+Removes all resources in `rg-gitea-sec`. The Terraform state backend (`rg-tfstate`) is shared and not destroyed.
 
 ---
 
@@ -313,13 +354,17 @@ Removes all resources in `rg-gitea-sec`. The Terraform state backend (`rg-tfstat
 | Topic | Implementation |
 |---|---|
 | Threat analysis | STRIDE model, trust boundaries, 12-item risk matrix |
-| Misuse cases | 6 documented attack scenarios with expected outcomes |
+| Misuse cases | 6 documented attack scenarios with validation scripts |
 | Authentication | `INSTALL_LOCK=true`, `DISABLE_REGISTRATION`, `REQUIRE_SIGNIN_VIEW` |
+| Multi-factor authentication | Gitea built-in TOTP (`docs/evidence/mfa-setup.md`) |
 | Cryptography | TLS 1.2+ enforced on all ingress endpoints |
 | Key management | Azure Key Vault + Managed Identity (no plaintext secrets anywhere) |
 | Application security | Rootless container (UID 1000), SSH disabled, no self-signup |
-| System security | Single replica, no SSH port exposed, minimal image surface |
-| Logging/monitoring | Log Analytics workspace, 4 alert rules, 8 KQL detection queries |
+| System security | Single replica, no SSH exposed, minimal Alpine image |
+| Logging/monitoring | Log Analytics workspace, 4 alert rules, 8 KQL queries with trigger instructions |
 | DevSecOps | Gitleaks + Terraform validate + Checkov + Trivy as mandatory pipeline gates |
+| DAST | OWASP ZAP baseline scan (`scripts/dast/`, `dast.yml` workflow) |
+| WAF | NGINX + ModSecurity + OWASP CRS blocking mode (`scripts/waf/`) |
 | CI/CD security | OIDC federated credentials — no stored Azure credentials in GitHub |
 | Laws/standards | Zero Trust (NIST SP 800-207), OWASP Top 10, CIS Azure Benchmarks (via Checkov) |
+| Control validation | `docs/control-test-mapping.md` — every control mapped to test + expected result |
