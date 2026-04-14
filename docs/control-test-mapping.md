@@ -22,9 +22,9 @@ Use this as a validation checklist when capturing evidence for the BoK assessmen
 
 | Control | Setting / Tool | Test Method | Expected Result | Evidence File |
 |---------|---------------|-------------|-----------------|---------------|
-| TOTP MFA enrollment | Gitea Settings → Security → Two-Factor | Manual: follow `docs/evidence/mfa-setup.md` | After enrollment, password alone shows TOTP prompt | `phase5-mfa/screenshot-totp-prompt.png` |
-| MFA — valid code grants access | Gitea TOTP | Enter correct 6-digit code | Login succeeds | `phase5-mfa/screenshot-totp-success.png` |
-| MFA — invalid code rejected | Gitea TOTP | Enter `000000` as TOTP code | "Invalid two-factor code" error | `phase5-mfa/screenshot-totp-invalid.png` |
+| TOTP MFA enrollment | Gitea Settings → Security → Two-Factor | Manual: follow `docs/evidence/mfa-setup.md` | After enrollment, password alone shows TOTP prompt | `phase8-mfa/screenshot-totp-prompt.png` |
+| MFA — valid code grants access | Gitea TOTP | Enter correct 6-digit code | Login succeeds | `phase8-mfa/screenshot-totp-success.png` |
+| MFA — invalid code rejected | Gitea TOTP | Enter `000000` as TOTP code | "Invalid two-factor code" error | `phase8-mfa/screenshot-totp-invalid.png` |
 
 ---
 

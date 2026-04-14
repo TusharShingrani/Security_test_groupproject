@@ -17,9 +17,8 @@ Risk Score = Probability × Impact
 | R9 | Denial of service (traffic spike) | 2 | 3 | 6 | Alert rule + Container Apps scaling | Low (1×2=2) |
 | R10 | Log Analytics unavailable | 1 | 3 | 3 | Azure SLA 99.9% + 30-day log retention | Low (1×2=2) |
 | R11 | Azure Files data loss | 1 | 5 | 5 | LRS replication (3 copies in region) | Low (1×3=3) |
-| R12 | OIDC misconfiguration | 2 | 4 | 8 | Manual setup documented + test validation | Medium (2×2=4) |
-| R13 | Web app vulnerability (XSS, SQLi) | 2 | 4 | 8 | ModSecurity WAF sidecar (always on, blocking) + OWASP ZAP DAST (weekly) | Low (1×2=2) |
-| R14 | Session cookie hijacking | 2 | 4 | 8 | `COOKIE_SECURE=true` + `SAME_SITE=lax` + 1-hour timeout + HTTPS enforced + WAF blocks XSS | Low (1×2=2) |
+| R12 | Web app vulnerability (XSS, SQLi) | 2 | 4 | 8 | ModSecurity WAF sidecar (always on, blocking) + OWASP ZAP DAST (weekly) | Low (1×2=2) |
+| R13 | Session cookie hijacking | 2 | 4 | 8 | `COOKIE_SECURE=true` + `SAME_SITE=lax` + 1-hour timeout + HTTPS enforced + WAF blocks XSS | Low (1×2=2) |
 
 ## Risk Heat Map
 
@@ -57,11 +56,11 @@ Impact
 | `alert-abnormal-traffic` + Container Apps scaling | R9 |
 | Log Analytics 30-day retention | R10 |
 | Azure Files LRS replication | R11 |
-| OIDC federated credentials (documented setup) | R12 |
-| ModSecurity WAF sidecar (always-on, blocking mode) | R13, R14 |
-| OWASP ZAP DAST baseline (weekly schedule) | R13 |
-| `COOKIE_SECURE=true` + `SAME_SITE=lax` + 1-hour timeout | R14 |
-| HTTPS enforced via Container Apps ingress | R14 |
+| ModSecurity WAF sidecar (always-on, blocking mode) | R12, R13 |
+| OWASP ZAP DAST baseline (weekly schedule) | R12 |
+| `COOKIE_SECURE=true` + `SAME_SITE=lax` + 1-hour timeout | R13 |
+| HTTPS enforced via Container Apps ingress | R13 |
+| GitHub Actions OIDC federated credentials (no stored secret) | CI/CD |
 
 ## Notes on Accepted Residual Risks
 
@@ -70,9 +69,3 @@ Impact
 of the Gitea binary by the upstream maintainers, not a configuration change.
 These are monitored; if Gitea releases an updated image the ignore entries will
 be reviewed. Rootless container (R5 mitigation) limits exploitation impact.
-
-**R12 — OIDC misconfiguration (Medium residual):**  
-Entra ID OIDC is not configured in the current PoC deployment (student
-subscription restricts app registration creation via the portal). The Azure CLI
-workaround is documented in `docs/architecture/resource-assessment.md`. Gitea
-TOTP MFA (R2 mitigation) serves as a compensating control.

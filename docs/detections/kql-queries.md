@@ -82,7 +82,6 @@ ContainerAppConsoleLogs_CL
 
 Detects direct password-based logins. With `DISABLE_REGISTRATION=true` only
 the admin account can log in locally — any volume here warrants investigation.
-(When Entra ID OIDC is enabled this query can distinguish OIDC from local logins.)
 
 ```kql
 ContainerAppConsoleLogs_CL

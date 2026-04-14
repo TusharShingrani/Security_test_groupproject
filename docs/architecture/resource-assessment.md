@@ -8,9 +8,6 @@
 | Azure Subscription | `bb1cb633-bb7e-44c4-b709-189e1cceee7e` | **Reuse** | Same subscription |
 | Region | `norwayeast` | **Reuse** | Cheapest available, Container Apps supported |
 | GitHub OIDC app registration | `wss-poc-github-oidc` (`fda29fdf-...`) | **Reuse** | Added new federated credential `gitea-sec-branch` for this branch |
-| Resource Group `rg-wss-poc` | VM-based RG | **Not reused** | Tied to VM project, clean separation needed |
-| VNet `vnet-wss-poc` | 10.0.0.0/16 | **Not reused** | Container Apps uses managed networking; separate concerns |
-| VMs (twin/agent/attacker) | 3x Standard_B2ats_v2 | **Not reused** | Different project entirely |
 
 ## New Resources (this project)
 
@@ -21,8 +18,8 @@
 | Monitor Action Group | `ag-gitea-sec` | Alert notification target |
 | Monitor Alert Rules (4) | `alert-*` (ARM deployment) | Security event detection |
 | User Assigned Identity | `id-gitea-sec` | Managed identity for Key Vault access |
-| Key Vault | `kv-gitea-<random>` | Secrets (admin password, secret key, OIDC) |
-| Storage Account | `sagitea<random>` | Azure Files for Gitea persistence (repos, logs) |
+| Key Vault | `kv-gitea-vcqg9x` | Secrets (admin password, secret key, OIDC placeholder) |
+| Storage Account | `sagiteavcqg9x` | Azure Files for Gitea persistence (repos, logs) |
 | File Share | `gitea-data` (10 GiB) | Mounted at `/var/lib/gitea` in container |
 | Container Apps Environment | `cae-gitea-sec` | Managed container runtime (Consumption plan) |
 | Container App | `ca-gitea` | Two containers: WAF sidecar (`owasp/modsecurity-crs:nginx-alpine`, 0.25 vCPU / 0.5Gi) + Gitea (`latest-rootless`, 0.5 vCPU / 1Gi). 1 replica. |
