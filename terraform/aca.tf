@@ -281,6 +281,15 @@ resource "azurerm_container_app" "gitea" {
         value = "/tmp/gitea-queues"
       }
 
+      # Issue indexer — use SQLite (db) instead of Bleve. Bleve uses LevelDB
+      # internally and cannot open a memory-mapped store on Azure Files SMB
+      # (permission denied). The db provider uses the existing SQLite database
+      # on EmptyDir, which has working POSIX permissions. Adequate for PoC scale.
+      env {
+        name  = "GITEA__indexer__ISSUE_INDEXER_TYPE"
+        value = "db"
+      }
+
       # Azure Files mount — repos, avatars, attachments, logs
       volume_mounts {
         name = "gitea-data"
