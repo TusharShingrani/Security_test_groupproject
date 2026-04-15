@@ -272,6 +272,15 @@ resource "azurerm_container_app" "gitea" {
         value = "/var/lib/gitea/log"
       }
 
+      # Queue data on local tmpfs — Azure Files SMB does not support the POSIX
+      # permissions required by LevelDB (the queue backing store). Moving queues
+      # to /tmp mirrors the same fix applied to the SQLite DB (EmptyDir).
+      # Queue data is ephemeral by design; Gitea re-initialises queues on startup.
+      env {
+        name  = "GITEA__queue__DATADIR"
+        value = "/tmp/gitea-queues"
+      }
+
       # Azure Files mount — repos, avatars, attachments, logs
       volume_mounts {
         name = "gitea-data"
