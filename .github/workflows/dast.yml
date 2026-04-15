@@ -40,22 +40,55 @@ jobs:
               -J zap-report.json \
               -w zap-report.md \
               -I
-          ZAP_EXIT=$?
-          echo "ZAP exit code: $ZAP_EXIT"
-          # 0 = no alerts, 1 = warnings found, 2 = errors — all produce reports
-          if [ $ZAP_EXIT -eq 2 ]; then
-            echo "ZAP exited with errors — check log above"
-          fi
+          echo "ZAP exit code: $?"
           exit 0
 
-      - name: Show report summary
+      - name: Publish Job Summary
         if: always()
         run: |
-          echo "=== Files generated ==="
-          ls -lh zap-output/
-          echo ""
-          echo "=== ZAP Markdown Summary ==="
-          cat zap-output/zap-report.md 2>/dev/null || echo "(no markdown report found)"
+          REPORT="zap-output/zap-report.json"
+
+          if [ ! -f "$REPORT" ]; then
+            echo "## :warning: ZAP Scan — no report generated" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          HIGH=$(jq   '[.site[0].alerts[] | select(.riskcode == "3")] | length' "$REPORT")
+          MEDIUM=$(jq '[.site[0].alerts[] | select(.riskcode == "2")] | length' "$REPORT")
+          LOW=$(jq    '[.site[0].alerts[] | select(.riskcode == "1")] | length' "$REPORT")
+          INFO=$(jq   '[.site[0].alerts[] | select(.riskcode == "0")] | length' "$REPORT")
+          TARGET="${{ github.event.inputs.target_url || 'https://ca-gitea.wittydune-da50dd5c.norwayeast.azurecontainerapps.io' }}"
+
+          if [ "$HIGH" -gt 0 ]; then
+            BADGE=":red_circle: FAIL"
+          elif [ "$MEDIUM" -gt 0 ]; then
+            BADGE=":yellow_circle: WARN"
+          else
+            BADGE=":green_circle: PASS"
+          fi
+
+          {
+            echo "## OWASP ZAP Baseline Scan"
+            echo ""
+            echo "**Target:** \`$TARGET\`"
+            echo ""
+            echo "| Result | :red_circle: High | :yellow_circle: Medium | :large_blue_circle: Low | :white_circle: Info |"
+            echo "|---|---|---|---|---|"
+            echo "| **$BADGE** | $HIGH | $MEDIUM | $LOW | $INFO |"
+            echo ""
+            echo "### Alerts"
+            echo ""
+            echo "| Risk | Alert | Instances |"
+            echo "|---|---|---|"
+            jq -r '.site[0].alerts[] |
+              if   .riskcode == "3" then "| :red_circle: High"
+              elif .riskcode == "2" then "| :yellow_circle: Medium"
+              elif .riskcode == "1" then "| :large_blue_circle: Low"
+              else                       "| :white_circle: Info"
+              end + " | \(.name) | \(.count) |"' "$REPORT"
+            echo ""
+            echo "> Full HTML report available in the \`zap-reports\` artifact below."
+          } >> $GITHUB_STEP_SUMMARY
 
       - name: Upload ZAP reports
         uses: actions/upload-artifact@v4
