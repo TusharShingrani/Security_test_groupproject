@@ -302,6 +302,15 @@ resource "azurerm_container_app" "gitea" {
         value = "db"
       }
 
+      # Web UI file-edit scratch directory — Gitea clones repos into a temp dir
+      # when processing web-based edits/uploads. Default is /var/lib/gitea/tmp/
+      # which is on Azure Files SMB; git calls chmod on config.lock → EPERM.
+      # Redirect to local tmpfs where POSIX permissions work correctly.
+      env {
+        name  = "GITEA__repository__LOCAL_COPY_PATH"
+        value = "/tmp/gitea-local-repo"
+      }
+
       # Git repository root — move off Azure Files SMB. Git's lock-file write
       # mechanism calls chmod unconditionally; SMB returns EPERM. EmptyDir has
       # working POSIX permissions so git init and all repo operations succeed.
