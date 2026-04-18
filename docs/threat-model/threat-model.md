@@ -124,7 +124,7 @@ Zone 5 (GitHub Actions)     — Trusted CI/CD (OIDC federated — no stored secr
 | Gap | Reason | Compensating Control |
 |---|---|---|
 | No Entra ID OIDC (no centrally managed identities) | Student subscription restricts app registration portal | Local Gitea accounts + TOTP MFA; single admin account minimises exposure |
-| SQLite DB is ephemeral (EmptyDir) | Azure Files SMB does not support POSIX file locks | Only user accounts are lost on restart; git repos on Azure Files are unaffected |
+| SQLite DB and git repos are ephemeral (EmptyDir) | Azure Files SMB does not support POSIX `fcntl()` locks (SQLite) or `chmod` (git lock files) | User accounts and repositories are lost on container restart; avatars, attachments, and logs on Azure Files are unaffected. Production fix: Azure NFS Files + PostgreSQL |
 | No Content Security Policy header | WAF NGINX template doesn't expose a header-injection env var without a custom image | WAF blocks XSS payloads before they reach the browser; Gitea sets X-Frame-Options and X-Content-Type-Options by default |
 | No IP allowlist on Key Vault | Container Apps Consumption plan has no VNet injection | Access policy limits reads to the managed identity only — network ACLs add defence-in-depth but are not the primary control |
 | Trivy CVEs exit-code 0 (non-blocking) | New Go stdlib CVEs are published faster than Gitea rebuilds their image | All accepted CVEs documented in `.trivyignore` with justification; rootless container limits blast radius |

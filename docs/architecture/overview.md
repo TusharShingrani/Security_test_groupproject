@@ -61,15 +61,19 @@
 
 | Path in Container | Volume | Type | Persistent |
 |---|---|---|---|
-| `/var/lib/gitea` | `gitea-data` | Azure Files (SMB) | Yes — repos, avatars, attachments, logs |
-| `/gitea-db` | `gitea-db` | EmptyDir (local) | No — SQLite database only |
+| `/var/lib/gitea` | `gitea-data` | Azure Files (SMB) | Yes — avatars, attachments, logs |
+| `/gitea-repos` | `gitea-repos` | EmptyDir (local) | No — git repositories |
+| `/gitea-db` | `gitea-db` | EmptyDir (local) | No — SQLite database |
 | `/tmp/gitea-home` | (tmpfs) | Container local | No — git config scratch space |
 
-> **Why EmptyDir for the DB?** Azure Files uses SMB, which does not implement the POSIX
-> `fcntl()` advisory locks that SQLite requires. Moving the DB to EmptyDir gives local
-> storage with working POSIX locks. The trade-off is that the database (user accounts,
-> settings) is lost on container restart. For production, replace SQLite with
-> Azure Database for PostgreSQL Flexible Server.
+> **Why EmptyDir for repos and DB?** Azure Files uses SMB, which does not support
+> `chmod`. Git's lock-file mechanism calls `chmod` unconditionally when writing
+> repository config files (e.g. during `git init`), returning `EPERM` on SMB.
+> SQLite also requires POSIX `fcntl()` locks unavailable on SMB. Both are moved
+> to EmptyDir where POSIX semantics work correctly. Trade-off: repositories and
+> user accounts are lost on container restart.
+> For production: use Azure NFS Files (Premium tier) or Azure NetApp Files for
+> repos (full POSIX support), and Azure Database for PostgreSQL for the DB.
 
 ## Trust Boundaries
 

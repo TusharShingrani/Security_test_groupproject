@@ -85,6 +85,18 @@ resource "azurerm_container_app" "gitea" {
       storage_type = "EmptyDir"
     }
 
+    # Local ephemeral volume for git repositories — Azure Files SMB does not
+    # support chmod. Git's lock-file mechanism calls chmod when writing to repo
+    # config files during `git init`, causing "Operation not permitted". Moving
+    # repos to local EmptyDir gives a POSIX-compatible filesystem where chmod
+    # works. Trade-off: repos are lost on container restart (PoC limitation).
+    # Production fix: switch to Azure NFS Files (Premium tier) or Azure NetApp
+    # Files, both of which support full POSIX semantics.
+    volume {
+      name         = "gitea-repos"
+      storage_type = "EmptyDir"
+    }
+
     # ── WAF sidecar — NGINX + ModSecurity + OWASP CRS ──────────────────────
     # Listens on port 8080, proxies clean requests to localhost:3000 (Gitea).
     # Blocks requests that match OWASP CRS rules (SQLi, XSS, path traversal,
@@ -290,7 +302,15 @@ resource "azurerm_container_app" "gitea" {
         value = "db"
       }
 
-      # Azure Files mount — repos, avatars, attachments, logs
+      # Git repository root — move off Azure Files SMB. Git's lock-file write
+      # mechanism calls chmod unconditionally; SMB returns EPERM. EmptyDir has
+      # working POSIX permissions so git init and all repo operations succeed.
+      env {
+        name  = "GITEA__repository__ROOT"
+        value = "/gitea-repos"
+      }
+
+      # Azure Files mount — avatars, attachments, logs (no git repos)
       volume_mounts {
         name = "gitea-data"
         path = "/var/lib/gitea"
@@ -300,6 +320,12 @@ resource "azurerm_container_app" "gitea" {
       volume_mounts {
         name = "gitea-db"
         path = "/gitea-db"
+      }
+
+      # EmptyDir mount — git repositories
+      volume_mounts {
+        name = "gitea-repos"
+        path = "/gitea-repos"
       }
 
       # Liveness probe — checks Gitea directly on its internal port
