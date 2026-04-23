@@ -7,7 +7,7 @@ This project demonstrates a security-first deployment of Gitea (a self-hosted Gi
 **Research question:** How effective are Zero Trust controls and DevSecOps security automation in reducing risks in a cloud-hosted platform?
 
 **Subquestions:**
-1. How does Entra ID + RBAC improve access security?
+1. How does Zero Trust access control (RBAC, MFA, no self-registration) improve access security?
 2. How effective is Key Vault vs storing secrets in config?
 3. How does container hardening + scanning reduce risk?
 4. How effective are CI/CD security gates at blocking insecure deployments?
@@ -24,30 +24,41 @@ This project demonstrates a security-first deployment of Gitea (a self-hosted Gi
     │  Azure Container Apps     │
     │  Ingress (managed)        │
     └────────────┬──────────────┘
-                 │
+                 │ port 8080
                  ▼
-    ┌───────────────────────────┐
-    │   Gitea (ca-gitea)        │
-    │   gitea/gitea:latest-rootless│
-    │   UID 1000, Port 3000     │
-    └──────┬──────────┬─────────┘
-           │          │
-           ▼          ▼
+    ┌────────────────────────────────────────┐
+    │            ca-gitea (Container App)    │
+    │                                        │
+    │  ┌──────────────────────────────────┐  │
+    │  │  WAF sidecar                     │  │
+    │  │  owasp/modsecurity-crs:nginx-alpine│ │
+    │  │  Port 8080 — OWASP CRS blocking  │  │
+    │  └──────────────┬───────────────────┘  │
+    │                 │ localhost:3000        │
+    │                 ▼                      │
+    │  ┌──────────────────────────────────┐  │
+    │  │  Gitea                           │  │
+    │  │  gitea/gitea:latest-rootless     │  │
+    │  │  UID 1000, Port 3000 (internal)  │  │
+    │  └──────┬──────────────┬────────────┘  │
+    └─────────┼──────────────┼───────────────┘
+              │              │
+              ▼              ▼
   ┌──────────────┐  ┌──────────────────┐
   │  Key Vault   │  │  Azure Files     │
   │  kv-gitea-xx │  │  /var/lib/gitea  │
-  │              │  │  repos, avatars  │
-  │  - admin pw  │  │  attachments     │
-  │  - secret key│  │  logs            │
+  │  - admin pw  │  │  avatars, logs   │
+  │  - secret key│  │  attachments     │
   │  - OIDC sec  │  └──────────────────┘
   └──────────────┘
         ▲           ┌──────────────────┐
         │ managed   │  EmptyDir (local)│
         │ identity  │  /gitea-db       │
   ┌─────┴──────┐    │  SQLite DB       │
-  │  Managed   │    │  (ephemeral)     │
-  │  Identity  │    └──────────────────┘
-  └────────────┘
+  │  Managed   │    │  /gitea-repos    │
+  │  Identity  │    │  git repos       │
+  └────────────┘    │  (ephemeral)     │
+                    └──────────────────┘
 
   ┌──────────────────┐     ┌──────────────────┐
   │  Log Analytics   │     │  Monitor Alerts  │
@@ -64,10 +75,10 @@ Manual evidence tooling (local):
   scripts/validation/ → access control checks, brute-force sim, traffic gen
 ```
 
-> **Note:** The SQLite database is stored on an EmptyDir (local ephemeral) volume, not
-> on Azure Files. Azure Files uses SMB which does not support the POSIX `fcntl()` advisory
-> locks that SQLite requires. User accounts and settings are recreated after a container
-> restart; git repositories on Azure Files persist across restarts.
+> **Note:** Both the SQLite database and git repositories are stored on EmptyDir (local
+> ephemeral) volumes. Azure Files uses SMB which does not support POSIX `fcntl()` locks
+> (SQLite) or `chmod` (git). User accounts and git repositories are lost on container
+> restart. Only avatars, attachments, and logs on Azure Files persist.
 
 See [docs/architecture/overview.md](docs/architecture/overview.md) for full details.
 
@@ -236,8 +247,8 @@ Inside the shell (type as a single line):
 gitea admin user create --config /etc/gitea/app.ini --admin --username gitea-admin --password 'your-password' --email your@email.com --must-change-password=false
 ```
 
-> The admin user must be recreated after a container restart because the SQLite database
-> is on an ephemeral EmptyDir volume. Git repositories on Azure Files are unaffected.
+> Both the admin user (SQLite DB) and git repositories (EmptyDir) are lost on container
+> restart and must be recreated. Only avatars, attachments, and logs on Azure Files persist.
 
 ---
 
@@ -249,7 +260,7 @@ gitea admin user create --config /etc/gitea/app.ini --admin --username gitea-adm
 |---|---|---|
 | `alert-container-restarts` | OOMKilled / CrashLoopBackOff in system logs | 2 |
 | `alert-failed-logins` | ≥5 failed logins in 5 min | 2 |
-| `alert-local-auth-attempt` | Sign-in without OAuth2 (OIDC bypass) | 1 |
+| `alert-local-auth-attempt` | Local password sign-in (non-OAuth2 path) | 1 |
 | `alert-abnormal-traffic` | >500 requests/min | 2 |
 
 ### Viewing Logs
@@ -331,7 +342,8 @@ Risk matrix: [docs/risk-analysis/risk-matrix.md](docs/risk-analysis/risk-matrix.
 
 | Limitation | Reason | Mitigation |
 |---|---|---|
-| SQLite DB is ephemeral (EmptyDir) | Azure Files SMB does not support POSIX file locks required by SQLite | Replace with Azure Database for PostgreSQL in production |
+| SQLite DB is ephemeral (EmptyDir) | Azure Files SMB does not support POSIX `fcntl()` locks required by SQLite | Replace with Azure Database for PostgreSQL in production |
+| Git repositories are ephemeral (EmptyDir) | Azure Files SMB does not support `chmod`; git calls `chmod` unconditionally on lock files during `git init` | Use Azure NFS Files (Premium) or Azure NetApp Files in production |
 | Key Vault purge protection disabled | Easier PoC teardown | Enable in production |
 | Key Vault network ACLs allow all | Container Apps Consumption plan has no VNet injection | Tighten to deny + IP allowlist in production |
 | No Entra ID OIDC configured | Student subscription restricts app registration creation | Use CLI (`az ad app ...`) with tenant admin; Gitea TOTP is a compensating control |
