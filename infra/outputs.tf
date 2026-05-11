@@ -26,8 +26,20 @@ output "auth_mode" {
   value = var.auth_mode
 }
 
+output "ca_cert_pem" {
+  description = "CA certificate (trust anchor for all certs in this PoC)."
+  value       = tls_self_signed_cert.poc_ca.cert_pem
+  sensitive   = true
+}
+
 output "server_cert_pem" {
-  description = "TLS certificate for the agent WSS server (copy to VMs if cloud-init failed)."
-  value       = tls_self_signed_cert.agent_server.cert_pem
+  description = "Agent WSS server certificate signed by the PoC CA."
+  value       = tls_locally_signed_cert.agent_server.cert_pem
+  sensitive   = true
+}
+
+output "twin_client_cert_pem" {
+  description = "Twin client certificate (used in AUTH_MODE=mtls)."
+  value       = tls_locally_signed_cert.twin_client.cert_pem
   sensitive   = true
 }

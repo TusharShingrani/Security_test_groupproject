@@ -11,6 +11,7 @@
 #   attack-once     - Run attacker a single time (Phase A)
 #   attack-loop     - Run attacker in a loop (Phase A, sustained)
 #   phase-b-on      - Switch to AUTH_MODE=token on all VMs (show the fix)
+#   phase-c-on      - Switch to AUTH_MODE=mtls on all VMs (mTLS — Phase C)
 #   phase-a-on      - Switch back to AUTH_MODE=none (show the vulnerability again)
 #   fix-twin        - Manually deploy files to twin-vm (if cloud-init failed)
 #   help            - Show this message
@@ -112,6 +113,20 @@ cmd_phase_b_on() {
   echo "Done. Legitimate twin uses token '$TOKEN' — attacker has no token and will be rejected."
   echo "Run: ./demo.sh attack-once   # to prove attacker is now blocked"
   echo "Run: ./demo.sh logs-agent    # to watch the agent reject the attack"
+}
+
+cmd_phase_c_on() {
+  get_twin_ip; ensure_key
+  echo ">>> Enabling AUTH_MODE=mtls on agent and twin (Phase C — mutual TLS)"
+  echo "    Twin presents its client cert; attacker has no cert and is blocked at TLS handshake."
+
+  agent_ssh "sudo sed -i 's/^AUTH_MODE=.*/AUTH_MODE=mtls/' /opt/p2p-demo/agent.env && sudo systemctl restart agent && echo 'agent restarted'"
+  twin_ssh  "sudo sed -i 's/^AUTH_MODE=.*/AUTH_MODE=mtls/' /opt/p2p-demo/twin.env && sudo systemctl restart twin && echo 'twin restarted'"
+
+  echo ""
+  echo "Done. Now run the attacker to confirm it is stopped at the TLS layer:"
+  echo "  ./demo.sh attack-once   # attacker gets SSL handshake error — never reaches the app"
+  echo "  ./demo.sh logs-agent    # 'mTLS OK' for twin; nothing logged for attacker (rejected by SSL)"
 }
 
 cmd_phase_a_on() {
@@ -249,6 +264,7 @@ case "${1:-help}" in
   attack-once)     cmd_attack_once ;;
   attack-loop)     cmd_attack_loop ;;
   phase-b-on)      cmd_phase_b_on ;;
+  phase-c-on)      cmd_phase_c_on ;;
   phase-a-on)      cmd_phase_a_on ;;
   fix-twin)        cmd_fix_twin ;;
   help|*)          cmd_help ;;

@@ -16,10 +16,22 @@ write_files:
     permissions: "0755"
     content: ${base64encode(twin_py)}
 
-  - path: /opt/p2p-demo/certs/server.crt
+  # CA cert — trust anchor for verifying the agent server certificate
+  - path: /opt/p2p-demo/certs/ca.crt
     encoding: b64
     permissions: "0644"
-    content: ${base64encode(server_cert_pem)}
+    content: ${base64encode(ca_cert_pem)}
+
+  # Twin client cert + key — presented to the agent in AUTH_MODE=mtls
+  - path: /opt/p2p-demo/certs/twin-client.crt
+    encoding: b64
+    permissions: "0644"
+    content: ${base64encode(twin_client_cert_pem)}
+
+  - path: /opt/p2p-demo/certs/twin-client.key
+    encoding: b64
+    permissions: "0600"
+    content: ${base64encode(twin_client_key_pem)}
 
   - path: /opt/p2p-demo/twin.env
     permissions: "0600"
@@ -28,7 +40,9 @@ write_files:
       SCHEDULE_TOKEN=${schedule_token}
       AGENT_HOST=${agent_private_ip}
       WSS_PORT=${wss_port}
-      CA_CERT_PATH=/opt/p2p-demo/certs/server.crt
+      CA_CERT_PATH=/opt/p2p-demo/certs/ca.crt
+      CLIENT_CERT_PATH=/opt/p2p-demo/certs/twin-client.crt
+      CLIENT_KEY_PATH=/opt/p2p-demo/certs/twin-client.key
       LOG_DIR=/var/log/p2p-demo
 
   - path: /home/${admin_username}/.ssh/poc_rsa

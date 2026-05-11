@@ -3,12 +3,13 @@
 agent.py - WSS Software Agent server.
 
 Demonstrates the security finding:
-  AUTH_MODE=none  -> accepts ANY sender (vulnerability)
-  AUTH_MODE=token -> requires matching token (fix)
+  AUTH_MODE=none  -> accepts ANY sender (vulnerability — Phase A)
+  AUTH_MODE=token -> requires matching token in JSON payload (Phase B)
+  AUTH_MODE=mtls  -> requires a valid client TLS cert at handshake (Phase C)
 
 Env vars (from agent.env):
   AUTH_MODE, SCHEDULE_TOKEN, WSS_PORT, CERT_PATH, KEY_PATH,
-  STATE_DIR, LOG_DIR
+  CA_CERT_PATH, STATE_DIR, LOG_DIR
 """
 
 import asyncio
@@ -26,8 +27,9 @@ import websockets
 AUTH_MODE      = os.environ.get("AUTH_MODE", "none").lower()
 SCHEDULE_TOKEN = os.environ.get("SCHEDULE_TOKEN", "")
 WSS_PORT       = int(os.environ.get("WSS_PORT", "8443"))
-CERT_PATH      = os.environ.get("CERT_PATH", "/opt/p2p-demo/certs/server.crt")
-KEY_PATH       = os.environ.get("KEY_PATH",  "/opt/p2p-demo/certs/server.key")
+CERT_PATH      = os.environ.get("CERT_PATH",     "/opt/p2p-demo/certs/server.crt")
+KEY_PATH       = os.environ.get("KEY_PATH",      "/opt/p2p-demo/certs/server.key")
+CA_CERT_PATH   = os.environ.get("CA_CERT_PATH",  "/opt/p2p-demo/certs/ca.crt")
 STATE_DIR      = os.environ.get("STATE_DIR", "/var/lib/p2p-demo")
 LOG_DIR        = os.environ.get("LOG_DIR",   "/var/log/p2p-demo")
 
@@ -104,6 +106,10 @@ async def handle(websocket) -> None:
                 await websocket.send(json.dumps({"status": "rejected", "reason": "invalid or missing token"}))
                 continue
             log.info("Token OK for source=%s", source)
+        elif AUTH_MODE == "mtls":
+            # Client cert was already verified at TLS handshake — if we reach
+            # here the cert was valid and signed by the trusted CA.
+            log.info("mTLS OK for source=%s (cert verified at handshake)", source)
         else:
             # AUTH_MODE=none: THIS IS THE VULNERABILITY BEING DEMONSTRATED
             log.warning(
@@ -125,12 +131,21 @@ async def main() -> None:
     ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ssl_ctx.load_cert_chain(certfile=CERT_PATH, keyfile=KEY_PATH)
 
+    if AUTH_MODE == "mtls":
+        # Require a client certificate signed by the trusted CA.
+        # Any connection without a valid cert is rejected at the TLS handshake —
+        # the application-layer handler is never reached.
+        ssl_ctx.verify_mode = ssl.CERT_REQUIRED
+        ssl_ctx.load_verify_locations(CA_CERT_PATH)
+
     log.info("=" * 55)
     log.info("Software Agent starting")
     log.info("  AUTH_MODE : %s", AUTH_MODE)
     log.info("  Port      : %d", WSS_PORT)
     if AUTH_MODE == "none":
         log.warning("  *** NO client authentication - vulnerability active ***")
+    elif AUTH_MODE == "mtls":
+        log.info("  mTLS: client cert required (CA: %s)", CA_CERT_PATH)
     log.info("=" * 55)
 
     async with websockets.serve(handle, "0.0.0.0", WSS_PORT, ssl=ssl_ctx):

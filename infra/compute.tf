@@ -14,16 +14,18 @@ locals {
 data "template_file" "twin_init" {
   template = file("${path.module}/cloud-init/twin.yaml.tftpl")
   vars = {
-    agent_private_ip = "10.0.1.20"
-    wss_port         = var.wss_port
-    auth_mode        = var.auth_mode
-    schedule_token   = var.schedule_token
-    twin_py          = local.twin_py
-    requirements_txt = local.requirements_txt
-    twin_service     = local.twin_service
-    server_cert_pem  = tls_self_signed_cert.agent_server.cert_pem
-    ssh_private_key  = tls_private_key.ssh.private_key_openssh
-    admin_username   = var.admin_username
+    agent_private_ip      = "10.0.1.20"
+    wss_port              = var.wss_port
+    auth_mode             = var.auth_mode
+    schedule_token        = var.schedule_token
+    twin_py               = local.twin_py
+    requirements_txt      = local.requirements_txt
+    twin_service          = local.twin_service
+    ca_cert_pem           = tls_self_signed_cert.poc_ca.cert_pem
+    twin_client_cert_pem  = tls_locally_signed_cert.twin_client.cert_pem
+    twin_client_key_pem   = tls_private_key.twin_client.private_key_pem
+    ssh_private_key       = tls_private_key.ssh.private_key_openssh
+    admin_username        = var.admin_username
   }
 }
 
@@ -36,7 +38,8 @@ data "template_file" "agent_init" {
     agent_py         = local.agent_py
     requirements_txt = local.requirements_txt
     agent_service    = local.agent_service
-    server_cert_pem  = tls_self_signed_cert.agent_server.cert_pem
+    ca_cert_pem      = tls_self_signed_cert.poc_ca.cert_pem
+    server_cert_pem  = tls_locally_signed_cert.agent_server.cert_pem
     server_key_pem   = tls_private_key.agent_server.private_key_pem
   }
 }
@@ -49,7 +52,7 @@ data "template_file" "attacker_init" {
     attacker_py      = local.attacker_py
     requirements_txt = local.requirements_txt
     attacker_service = local.attacker_service
-    server_cert_pem  = tls_self_signed_cert.agent_server.cert_pem
+    ca_cert_pem      = tls_self_signed_cert.poc_ca.cert_pem
   }
 }
 

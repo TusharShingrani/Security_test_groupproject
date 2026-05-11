@@ -29,7 +29,7 @@ import websockets
 
 AGENT_HOST   = os.environ.get("AGENT_HOST",   "10.0.1.20")
 WSS_PORT     = int(os.environ.get("WSS_PORT", "8443"))
-CA_CERT_PATH = os.environ.get("CA_CERT_PATH", "/opt/p2p-demo/certs/server.crt")
+CA_CERT_PATH = os.environ.get("CA_CERT_PATH", "/opt/p2p-demo/certs/ca.crt")
 LOG_DIR      = os.environ.get("LOG_DIR",      "/var/log/p2p-demo")
 
 LOG_FILE = os.path.join(LOG_DIR, "attacker.log")
@@ -76,6 +76,14 @@ async def attack(ssl_ctx: ssl.SSLContext) -> None:
             else:
                 log.info("Attack BLOCKED - reason: %s", resp.get("reason"))
                 log.info("Fix is working: AUTH_MODE=token rejected the attacker.")
+    except ssl.SSLError as exc:
+        log.warning("=" * 55)
+        log.warning("ATTACK BLOCKED at TLS layer (AUTH_MODE=mtls)")
+        log.warning("SSL handshake rejected: %s", exc)
+        log.warning("Agent requires a client certificate signed by the trusted CA.")
+        log.warning("Attacker has no valid client cert — connection refused before")
+        log.warning("any application data was exchanged.")
+        log.warning("=" * 55)
     except Exception as exc:
         log.error("Connection error: %s", exc)
 

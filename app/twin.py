@@ -4,7 +4,8 @@ twin.py - Digital Twin WSS client.
 Sends electrolyzer_enable=true every 10 seconds.
 
 Env vars (from twin.env):
-  AGENT_HOST, WSS_PORT, CA_CERT_PATH, AUTH_MODE, SCHEDULE_TOKEN, LOG_DIR
+  AGENT_HOST, WSS_PORT, CA_CERT_PATH, AUTH_MODE, SCHEDULE_TOKEN,
+  CLIENT_CERT_PATH, CLIENT_KEY_PATH, LOG_DIR
 """
 
 import asyncio
@@ -18,12 +19,14 @@ import websockets
 
 # ── Config ─────────────────────────────────────────────────────────────────
 
-AGENT_HOST     = os.environ.get("AGENT_HOST",    "10.0.1.20")
-WSS_PORT       = int(os.environ.get("WSS_PORT",  "8443"))
-CA_CERT_PATH   = os.environ.get("CA_CERT_PATH",  "/opt/p2p-demo/certs/server.crt")
-AUTH_MODE      = os.environ.get("AUTH_MODE",     "none").lower()
-SCHEDULE_TOKEN = os.environ.get("SCHEDULE_TOKEN", "")
-LOG_DIR        = os.environ.get("LOG_DIR",        "/var/log/p2p-demo")
+AGENT_HOST       = os.environ.get("AGENT_HOST",       "10.0.1.20")
+WSS_PORT         = int(os.environ.get("WSS_PORT",     "8443"))
+CA_CERT_PATH     = os.environ.get("CA_CERT_PATH",     "/opt/p2p-demo/certs/ca.crt")
+AUTH_MODE        = os.environ.get("AUTH_MODE",        "none").lower()
+SCHEDULE_TOKEN   = os.environ.get("SCHEDULE_TOKEN",   "")
+CLIENT_CERT_PATH = os.environ.get("CLIENT_CERT_PATH", "/opt/p2p-demo/certs/twin-client.crt")
+CLIENT_KEY_PATH  = os.environ.get("CLIENT_KEY_PATH",  "/opt/p2p-demo/certs/twin-client.key")
+LOG_DIR          = os.environ.get("LOG_DIR",          "/var/log/p2p-demo")
 
 LOG_FILE      = os.path.join(LOG_DIR, "twin.log")
 SEND_INTERVAL = 10  # seconds
@@ -50,7 +53,13 @@ async def main() -> None:
 
     ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ssl_ctx.load_verify_locations(CA_CERT_PATH)
-    ssl_ctx.check_hostname = False  # self-signed cert uses IP SAN
+    ssl_ctx.check_hostname = False  # cert uses IP SAN, not hostname
+
+    if AUTH_MODE == "mtls":
+        # Present the twin's client certificate during the TLS handshake.
+        # The agent verifies it against the shared CA — no cert, no connection.
+        ssl_ctx.load_cert_chain(certfile=CLIENT_CERT_PATH, keyfile=CLIENT_KEY_PATH)
+        log.info("mTLS: loading client cert %s", CLIENT_CERT_PATH)
 
     log.info("Digital Twin starting -> %s  AUTH_MODE=%s", uri, AUTH_MODE)
 

@@ -16,17 +16,20 @@ write_files:
     permissions: "0755"
     content: ${base64encode(attacker_py)}
 
-  - path: /opt/p2p-demo/certs/server.crt
+  # CA cert — attacker knows the CA exists and can verify the server cert.
+  # Intentionally NO client cert here: in AUTH_MODE=mtls the agent requires
+  # a client cert signed by this CA, which the attacker cannot present.
+  - path: /opt/p2p-demo/certs/ca.crt
     encoding: b64
     permissions: "0644"
-    content: ${base64encode(server_cert_pem)}
+    content: ${base64encode(ca_cert_pem)}
 
   - path: /opt/p2p-demo/attacker.env
     permissions: "0600"
     content: |
       AGENT_HOST=${agent_private_ip}
       WSS_PORT=${wss_port}
-      CA_CERT_PATH=/opt/p2p-demo/certs/server.crt
+      CA_CERT_PATH=/opt/p2p-demo/certs/ca.crt
       LOG_DIR=/var/log/p2p-demo
 
   - path: /etc/systemd/system/attacker.service

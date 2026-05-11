@@ -16,6 +16,13 @@ write_files:
     permissions: "0755"
     content: ${base64encode(agent_py)}
 
+  # CA cert — used to verify twin client certificates in AUTH_MODE=mtls
+  - path: /opt/p2p-demo/certs/ca.crt
+    encoding: b64
+    permissions: "0644"
+    content: ${base64encode(ca_cert_pem)}
+
+  # Server cert + key signed by the CA above
   - path: /opt/p2p-demo/certs/server.crt
     encoding: b64
     permissions: "0644"
@@ -34,6 +41,7 @@ write_files:
       WSS_PORT=${wss_port}
       CERT_PATH=/opt/p2p-demo/certs/server.crt
       KEY_PATH=/opt/p2p-demo/certs/server.key
+      CA_CERT_PATH=/opt/p2p-demo/certs/ca.crt
       STATE_DIR=/var/lib/p2p-demo
       LOG_DIR=/var/log/p2p-demo
 

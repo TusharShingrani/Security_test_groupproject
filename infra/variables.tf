@@ -75,9 +75,14 @@ variable "enable_public_ip_all" {
 # ── App ───────────────────────────────────────────────────────────────────────
 
 variable "auth_mode" {
-  description = "AUTH_MODE passed to agent: 'none' or 'token'."
+  description = "AUTH_MODE passed to agent: 'none' (Phase A), 'token' (Phase B), or 'mtls' (Phase C)."
   type        = string
   default     = "none"
+
+  validation {
+    condition     = contains(["none", "token", "mtls"], var.auth_mode)
+    error_message = "auth_mode must be 'none', 'token', or 'mtls'."
+  }
 }
 
 variable "schedule_token" {
