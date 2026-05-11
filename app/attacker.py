@@ -25,7 +25,7 @@ import sys
 
 import websockets
 
-# ── Config ─────────────────────────────────────────────────────────────────
+# ── Config ───────────────────────────────────────────────────────────────────────────
 
 AGENT_HOST   = os.environ.get("AGENT_HOST",   "10.0.1.20")
 WSS_PORT     = int(os.environ.get("WSS_PORT", "8443"))
@@ -34,7 +34,7 @@ LOG_DIR      = os.environ.get("LOG_DIR",      "/var/log/p2p-demo")
 
 LOG_FILE = os.path.join(LOG_DIR, "attacker.log")
 
-# ── Logging ────────────────────────────────────────────────────────────────
+# ── Logging ──────────────────────────────────────────────────────────────────────────
 
 os.makedirs(LOG_DIR, exist_ok=True)
 logging.basicConfig(
@@ -49,7 +49,7 @@ logging.basicConfig(
 log = logging.getLogger("attacker")
 
 
-# ── Attack ──────────────────────────────────────────────────────────────────
+# ── Attack ─────────────────────────────────────────────────────────────────────────────
 
 async def attack(ssl_ctx: ssl.SSLContext) -> None:
     uri = f"wss://{AGENT_HOST}:{WSS_PORT}"
@@ -85,13 +85,22 @@ async def attack(ssl_ctx: ssl.SSLContext) -> None:
         log.warning("any application data was exchanged.")
         log.warning("=" * 55)
     except Exception as exc:
-        log.error("Connection error: %s", exc)
+        msg = str(exc)
+        if "did not receive a valid HTTP response" in msg or "certificate" in msg.lower():
+            log.warning("=" * 55)
+            log.warning("ATTACK BLOCKED at TLS layer (AUTH_MODE=mtls)")
+            log.warning("TLS rejected before HTTP upgrade — no client cert provided.")
+            log.warning("Agent requires a client certificate signed by the trusted CA.")
+            log.warning("Attacker has no valid client cert — blocked before app layer.")
+            log.warning("=" * 55)
+        else:
+            log.error("Connection error: %s", exc)
 
 
 async def main(args: argparse.Namespace) -> None:
     ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    ssl_ctx.load_verify_locations(CA_CERT_PATH)
     ssl_ctx.check_hostname = False
+    ssl_ctx.verify_mode = ssl.CERT_NONE  # attacker skips server-cert check (realistic)
 
     log.info("Attacker ready -> wss://%s:%d", AGENT_HOST, WSS_PORT)
 
@@ -104,7 +113,7 @@ async def main(args: argparse.Namespace) -> None:
         await attack(ssl_ctx)
 
 
-# ── CLI ─────────────────────────────────────────────────────────────────────
+# ── CLI ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="WSS attacker script")
