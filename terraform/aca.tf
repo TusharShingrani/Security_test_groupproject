@@ -319,6 +319,11 @@ resource "azurerm_container_app" "gitea" {
         value = "/gitea-repos"
       }
 
+      env {
+        name  = "PROXY_SSL_HEADER"
+        value = "X-Forwarded-Proto https"
+      }
+
       # Azure Files mount — avatars, attachments, logs (no git repos)
       volume_mounts {
         name = "gitea-data"
