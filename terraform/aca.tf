@@ -97,6 +97,16 @@ resource "azurerm_container_app" "gitea" {
       storage_type = "EmptyDir"
     }
 
+    # Local ephemeral volume for Gitea's web-edit scratch directory.
+    # Gitea clones repos into LOCAL_COPY_PATH when processing web uploads/edits.
+    # The default path (/var/lib/gitea/tmp) is on Azure Files SMB which rejects
+    # git's chmod calls on lock files → "Operation not permitted". EmptyDir has
+    # full POSIX permissions so git clone and config writes succeed.
+    volume {
+      name         = "gitea-tmp"
+      storage_type = "EmptyDir"
+    }
+
     # ── WAF sidecar — NGINX + ModSecurity + OWASP CRS ──────────────────────
     # Listens on port 8080, proxies clean requests to localhost:3000 (Gitea).
     # Blocks requests that match OWASP CRS rules (SQLi, XSS, path traversal,
@@ -302,26 +312,12 @@ resource "azurerm_container_app" "gitea" {
         value = "db"
       }
 
-      # Web UI file-edit scratch directory — Gitea clones repos into a temp dir
-      # when processing web-based edits/uploads. Default is /var/lib/gitea/tmp/
-      # which is on Azure Files SMB; git calls chmod on config.lock → EPERM.
-      # Redirect to local tmpfs where POSIX permissions work correctly.
-      env {
-        name  = "GITEA__repository__LOCAL_COPY_PATH"
-        value = "/tmp/gitea-local-repo"
-      }
-
       # Git repository root — move off Azure Files SMB. Git's lock-file write
       # mechanism calls chmod unconditionally; SMB returns EPERM. EmptyDir has
       # working POSIX permissions so git init and all repo operations succeed.
       env {
         name  = "GITEA__repository__ROOT"
         value = "/gitea-repos"
-      }
-
-      env {
-        name  = "PROXY_SSL_HEADER"
-        value = "X-Forwarded-Proto https"
       }
 
       # Azure Files mount — avatars, attachments, logs (no git repos)
@@ -340,6 +336,12 @@ resource "azurerm_container_app" "gitea" {
       volume_mounts {
         name = "gitea-repos"
         path = "/gitea-repos"
+      }
+
+      # EmptyDir mount — web-edit scratch dir (chmod-safe local storage)
+      volume_mounts {
+        name = "gitea-tmp"
+        path = "/var/lib/gitea/tmp"
       }
 
       # Liveness probe — checks Gitea directly on its internal port
